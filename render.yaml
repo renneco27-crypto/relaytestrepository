@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: interview-relay
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: RELAY_SECRET
+        generateValue: true   # Render auto-generates a random secret, copy it from dashboard
