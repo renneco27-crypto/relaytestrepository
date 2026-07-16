@@ -13,11 +13,20 @@
 // ──────────────────────────────────────────────────────────────────────
 
 const { WebSocketServer, WebSocket } = require('ws');
+const http = require('http');
 
 const PORT = process.env.PORT || 8080;
 const SECRET = process.env.RELAY_SECRET || 'interview-copilot-secret';
 
-const wss = new WebSocketServer({ port: PORT });
+// HTTP server required by Render free tier — handles health checks
+// AND lets us manually handle the WebSocket upgrade (no separate port needed)
+const httpServer = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('Interview Copilot Relay — OK');
+});
+
+// Attach WebSocket server to the HTTP server instead of its own port
+const wss = new WebSocketServer({ server: httpServer });
 
 // Track connected clients by role
 const clients = {
@@ -110,5 +119,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-log(`Relay server running on port ${PORT}`);
-log(`Connect with: ws://localhost:${PORT}?role=phone&secret=${SECRET}`);
+httpServer.listen(PORT, '0.0.0.0', () => {
+  log(`Relay server running on port ${PORT}`);
+  log(`Connect with: ws://localhost:${PORT}?role=phone&secret=${SECRET}`);
+});
