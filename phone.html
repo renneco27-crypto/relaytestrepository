@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Interview Mic</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f1117;
+    color: #e0e0e0;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    padding: 24px;
+  }
+  h1 { font-size: 18px; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
+  #status {
+    font-size: 13px;
+    color: #888;
+    text-align: center;
+    min-height: 20px;
+    transition: color 0.2s;
+  }
+  #status.listening { color: #10b981; }
+  #status.error { color: #ef4444; }
+  #status.connected { color: #3b82f6; }
+
+  #micBtn {
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    border: none;
+    background: #1e293b;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px;
+    transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+    box-shadow: 0 0 0 0 rgba(16,185,129,0);
+  }
+  #micBtn.active {
+    background: #064e3b;
+    box-shadow: 0 0 0 12px rgba(16,185,129,0.15);
+    animation: pulse 1.5s infinite;
+  }
+  #micBtn:active { transform: scale(0.95); }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(16,185,129,0.3); }
+    70%  { box-shadow: 0 0 0 16px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0   rgba(16,185,129,0); }
+  }
+
+  #interim {
+    font-size: 13px;
+    color: #6b7280;
+    text-align: center;
+    min-height: 18px;
+    max-width: 320px;
+    font-style: italic;
+  }
+  #lastFinal {
+    font-size: 14px;
+    color: #d1d5db;
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.5;
+    min-height: 40px;
+  }
+
+  #relayStatus {
+    font-size: 11px;
+    color: #4b5563;
+    display: flex; align-items: center; gap: 6px;
+  }
+  #relayDot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #374151;
+    transition: background 0.3s;
+  }
+  #relayDot.on { background: #10b981; }
+  #relayDot.off { background: #ef4444; }
+
+  #hint { font-size: 11px; color: #4b5563; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>🎙 Interview Mic</h1>
+
+<div id="relayStatus">
+  <div id="relayDot"></div>
+  <span id="relayLabel">Connecting to relay…</span>
+</div>
+
+<button id="micBtn" onclick="toggleMic()">🎤</button>
+
+<div id="status">Tap mic to start</div>
+<div id="interim"></div>
+<div id="lastFinal"></div>
+<div id="hint">Keep this page open during your interview</div>
+
+<script>
+  // ── CONFIG — update RELAY_URL and RELAY_SECRET to match your Render deployment ──
+  const RELAY_URL    = 'wss://relaytestrepository.onrender.com';
+  const RELAY_SECRET = 'b523ac068e643047f7385a5f5d410b96a46f5bae221648f6d838a22237c304d1';
+
+  // ── State ──────────────────────────────────────────────────────────────────────
+  let recognition    = null;
+  let isListening    = false;
+  let relaySocket    = null;
+  let pingInterval   = null;
+  let reconnectTimer = null;
+
+  // ── Relay WebSocket ────────────────────────────────────────────────────────────
+  function connectRelay() {
+    clearTimeout(reconnectTimer);
+    if (relaySocket && relaySocket.readyState === WebSocket.OPEN) return;
+
+    relaySocket = new WebSocket(`${RELAY_URL}?role=phone&secret=${RELAY_SECRET}`);
+
+    relaySocket.onopen = () => {
+      setRelayStatus(true);
+      // Keepalive ping every 20s so Render free tier doesn't sleep
+      pingInterval = setInterval(() => {
+        if (relaySocket?.readyState === WebSocket.OPEN)
+          relaySocket.send(JSON.stringify({ type: 'ping' }));
+      }, 20000);
+    };
+
+    relaySocket.onclose = () => {
+      setRelayStatus(false);
+      clearInterval(pingInterval);
+      reconnectTimer = setTimeout(connectRelay, 5000);
+    };
+
+    relaySocket.onerror = () => {
+      setRelayStatus(false);
+    };
+  }
+
+  function sendTranscript(text, isFinal) {
+    if (relaySocket?.readyState === WebSocket.OPEN)
+      relaySocket.send(JSON.stringify({ type: 'transcript', text, isFinal }));
+  }
+
+  function setRelayStatus(connected) {
+    document.getElementById('relayDot').className   = connected ? 'on' : 'off';
+    document.getElementById('relayLabel').textContent = connected
+      ? 'Relay connected' : 'Relay disconnected — retrying…';
+  }
+
+  // ── Speech Recognition ─────────────────────────────────────────────────────────
+  function toggleMic() {
+    if (isListening) stopMic();
+    else startMic();
+  }
+
+  function startMic() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      setStatus('Use Chrome on Android or Safari on iOS.', 'error');
+      return;
+    }
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SR();
+    recognition.continuous      = true;
+    recognition.interimResults  = true;
+    recognition.maxAlternatives = 1;
+    recognition.lang            = 'en-US';
+
+    recognition.onstart = () => {
+      isListening = true;
+      document.getElementById('micBtn').classList.add('active');
+      document.getElementById('micBtn').textContent = '🔴';
+      setStatus('Listening…', 'listening');
+    };
+
+    recognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          document.getElementById('lastFinal').textContent = t.trim();
+          sendTranscript(t.trim(), true);
+        } else {
+          interim += t;
+          sendTranscript(t, false);
+        }
+      }
+      document.getElementById('interim').textContent = interim;
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === 'not-allowed') {
+        setStatus('Microphone blocked. Check browser permissions.', 'error');
+        stopMic();
+      } else if (e.error === 'network') {
+        setStatus('Network error — check connection.', 'error');
+      } else if (e.error !== 'no-speech') {
+        setStatus('Error: ' + e.error, 'error');
+      }
+    };
+
+    recognition.onend = () => {
+      // Auto-restart while still in listening mode
+      if (isListening) {
+        try { recognition.start(); } catch (err) {}
+      } else {
+        document.getElementById('micBtn').classList.remove('active');
+        document.getElementById('micBtn').textContent = '🎤';
+        setStatus('Tap mic to start', '');
+        document.getElementById('interim').textContent = '';
+      }
+    };
+
+    recognition.start();
+  }
+
+  function stopMic() {
+    isListening = false;
+    if (recognition) { try { recognition.stop(); } catch (e) {} recognition = null; }
+    document.getElementById('micBtn').classList.remove('active');
+    document.getElementById('micBtn').textContent = '🎤';
+    setStatus('Tap mic to start', '');
+    document.getElementById('interim').textContent = '';
+  }
+
+  function setStatus(msg, cls) {
+    const el = document.getElementById('status');
+    el.textContent  = msg;
+    el.className    = cls || '';
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────────────
+  connectRelay();
+
+  // Prevent screen from sleeping on mobile
+  if ('wakeLock' in navigator) {
+    navigator.wakeLock.request('screen').catch(() => {});
+  }
+</script>
+</body>
+</html>
