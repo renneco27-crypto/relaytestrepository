@@ -18,31 +18,57 @@ function loadEnv() {
 }
 loadEnv();
 
-const PORT   = process.env.PORT   || 8080;
-const SECRET = process.env.RELAY_SECRET || 'interview-copilot-secret';
-const RELAY_URL = process.env.RELAY_URL || '';
+const PORT      = process.env.PORT         || 8080;
+const SECRET    = process.env.RELAY_SECRET || 'interview-copilot-secret';
+const RELAY_URL = process.env.RELAY_URL    || '';
+
+// ──────────────────────────────────────────────────────────────────────
+// HTTP SERVER — serves phone.html at / and /phone.html
+// ──────────────────────────────────────────────────────────────────────
 
 const httpServer = http.createServer((req, res) => {
-  if (req.url === '/phone.html' || req.url === '/') {
+  const url = req.url.split('?')[0]; // strip query string for routing
+
+  if (url === '/' || url === '/phone.html') {
     const file = path.join(__dirname, 'phone.html');
     fs.readFile(file, 'utf8', (err, data) => {
-      if (err) { res.writeHead(404); res.end('Not found'); return; }
+      if (err) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('phone.html not found — make sure it is deployed alongside server.js');
+        return;
+      }
+      // Inject relay URL and secret so the page can connect without hardcoding.
       const injected = data
-        .replace(/\{\{RELAY_URL\}\}/g, RELAY_URL)
+        .replace(/\{\{RELAY_URL\}\}/g,    RELAY_URL)
         .replace(/\{\{RELAY_SECRET\}\}/g, SECRET);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(injected);
     });
     return;
   }
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Interview Copilot Relay - OK');
+
+  if (url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'ok',
+      phones:    clients.phone.size,
+      electrons: clients.electron.size,
+    }));
+    return;
+  }
+
+  res.writeHead(404, { 'Content-Type': 'text/plain' });
+  res.end('Not found');
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// WEBSOCKET RELAY
+// ──────────────────────────────────────────────────────────────────────
 
 const wss = new WebSocketServer({ server: httpServer });
 
 const clients = {
-  phone: new Set(),
+  phone:    new Set(),
   electron: new Set(),
 };
 
@@ -63,19 +89,19 @@ function broadcast(targetRole, payload) {
 }
 
 wss.on('connection', (ws, req) => {
-  const url = new URL(req.url, `http://localhost`);
-  const role = url.searchParams.get('role');
-  const secret = url.searchParams.get('secret');
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const role   = params.get('role');
+  const secret = params.get('secret');
 
   if (secret !== SECRET) {
     ws.close(4001, 'Unauthorized');
-    log(`Rejected connection - bad secret (role=${role})`);
+    log(`Rejected connection — bad secret (role=${role})`);
     return;
   }
 
   if (role !== 'phone' && role !== 'electron') {
     ws.close(4002, 'Unknown role');
-    log(`Rejected connection - unknown role: ${role}`);
+    log(`Rejected connection — unknown role: ${role}`);
     return;
   }
 
@@ -88,11 +114,7 @@ wss.on('connection', (ws, req) => {
 
   ws.on('message', (raw) => {
     let msg;
-    try {
-      msg = JSON.parse(raw);
-    } catch {
-      return;
-    }
+    try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'ping') {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pong' }));
@@ -101,11 +123,11 @@ wss.on('connection', (ws, req) => {
 
     if (role === 'phone' && msg.type === 'transcript') {
       const payload = {
-        type: 'transcript',
-        text: msg.text ?? '',
+        type:    'transcript',
+        text:    msg.text    ?? '',
         isFinal: msg.isFinal ?? false,
-        from: 'phone',
-        ts: Date.now(),
+        from:    'phone',
+        ts:      Date.now(),
       };
       broadcast('electron', payload);
       log(`Transcript (final=${payload.isFinal}): "${payload.text.slice(0, 60)}"`);
@@ -126,7 +148,12 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// ──────────────────────────────────────────────────────────────────────
+// START
+// ──────────────────────────────────────────────────────────────────────
+
 httpServer.listen(PORT, '0.0.0.0', () => {
   log(`Relay server running on port ${PORT}`);
-  log(`Connect with: ws://localhost:${PORT}?role=phone&secret=${SECRET}`);
+  log(`Phone page: http://localhost:${PORT}/`);
+  log(`WebSocket:  ws://localhost:${PORT}?role=phone&secret=${SECRET}`);
 });
