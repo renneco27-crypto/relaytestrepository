@@ -89,11 +89,11 @@
 </head>
 <body>
 
-<h1>🎙 Interview Mic</h1>
+<h1>Interview Mic</h1>
 
 <div id="relayStatus">
   <div id="relayDot"></div>
-  <span id="relayLabel">Connecting to relay…</span>
+  <span id="relayLabel">Connecting to relay...</span>
 </div>
 
 <button id="micBtn" onclick="toggleMic()">🎤</button>
@@ -104,27 +104,23 @@
 <div id="hint">Keep this page open during your interview</div>
 
 <script>
-  // ── CONFIG — update RELAY_URL and RELAY_SECRET to match your Render deployment ──
-  const RELAY_URL    = 'wss://relaytestrepository.onrender.com';
-  const RELAY_SECRET = 'b523ac068e643047f7385a5f5d410b96a46f5bae221648f6d838a22237c304d1';
+  const RELAY_URL    = '{{RELAY_URL}}';
+  const RELAY_SECRET = '{{RELAY_SECRET}}';
 
-  // ── State ──────────────────────────────────────────────────────────────────────
   let recognition    = null;
   let isListening    = false;
   let relaySocket    = null;
   let pingInterval   = null;
   let reconnectTimer = null;
 
-  // ── Relay WebSocket ────────────────────────────────────────────────────────────
   function connectRelay() {
     clearTimeout(reconnectTimer);
     if (relaySocket && relaySocket.readyState === WebSocket.OPEN) return;
 
-    relaySocket = new WebSocket(`${RELAY_URL}?role=phone&secret=${RELAY_SECRET}`);
+    relaySocket = new WebSocket(RELAY_URL + '?role=phone&secret=' + RELAY_SECRET);
 
     relaySocket.onopen = () => {
       setRelayStatus(true);
-      // Keepalive ping every 20s so Render free tier doesn't sleep
       pingInterval = setInterval(() => {
         if (relaySocket?.readyState === WebSocket.OPEN)
           relaySocket.send(JSON.stringify({ type: 'ping' }));
@@ -150,10 +146,9 @@
   function setRelayStatus(connected) {
     document.getElementById('relayDot').className   = connected ? 'on' : 'off';
     document.getElementById('relayLabel').textContent = connected
-      ? 'Relay connected' : 'Relay disconnected — retrying…';
+      ? 'Relay connected' : 'Relay disconnected - retrying...';
   }
 
-  // ── Speech Recognition ─────────────────────────────────────────────────────────
   function toggleMic() {
     if (isListening) stopMic();
     else startMic();
@@ -176,7 +171,7 @@
       isListening = true;
       document.getElementById('micBtn').classList.add('active');
       document.getElementById('micBtn').textContent = '🔴';
-      setStatus('Listening…', 'listening');
+      setStatus('Listening...', 'listening');
     };
 
     recognition.onresult = (e) => {
@@ -199,14 +194,13 @@
         setStatus('Microphone blocked. Check browser permissions.', 'error');
         stopMic();
       } else if (e.error === 'network') {
-        setStatus('Network error — check connection.', 'error');
+        setStatus('Network error - check connection.', 'error');
       } else if (e.error !== 'no-speech') {
         setStatus('Error: ' + e.error, 'error');
       }
     };
 
     recognition.onend = () => {
-      // Auto-restart while still in listening mode
       if (isListening) {
         try { recognition.start(); } catch (err) {}
       } else {
@@ -217,7 +211,7 @@
       }
     };
 
-    recognition.start();
+    try { recognition.start(); } catch (err) {}
   }
 
   function stopMic() {
@@ -235,10 +229,8 @@
     el.className    = cls || '';
   }
 
-  // ── Init ───────────────────────────────────────────────────────────────────────
   connectRelay();
 
-  // Prevent screen from sleeping on mobile
   if ('wakeLock' in navigator) {
     navigator.wakeLock.request('screen').catch(() => {});
   }

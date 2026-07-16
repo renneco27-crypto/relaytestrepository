@@ -1,46 +1,46 @@
-// ──────────────────────────────────────────────────────────────────────
-// INTERVIEW COPILOT — WebSocket Relay Server
-// Deploy on Render (free tier). Phone sends transcript → Electron receives it.
-//
-// Roles:
-//   "phone"    — the mobile browser, sends transcript chunks
-//   "electron" — the overlay app, receives transcript chunks
-//
-// Message format (JSON):
-//   Phone    → server: { type: "transcript", text: "...", isFinal: true }
-//   Server   → electron: same payload, plus { from: "phone" }
-//   Either   → server: { type: "ping" }  (keepalive, Render sleeps after 50s)
-// ──────────────────────────────────────────────────────────────────────
-
 const { WebSocketServer, WebSocket } = require('ws');
 const http = require('http');
-
-const PORT = process.env.PORT || 8080;
-const SECRET = process.env.RELAY_SECRET || 'interview-copilot-secret';
-
-// HTTP server required by Render free tier — handles health checks
-// AND lets us manually handle the WebSocket upgrade (no separate port needed)
 const fs   = require('fs');
 const path = require('path');
 
+function loadEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const idx = trimmed.indexOf('=');
+    if (idx === -1) continue;
+    const key = trimmed.slice(0, idx).trim();
+    const val = trimmed.slice(idx + 1).trim();
+    if (!process.env[key]) process.env[key] = val;
+  }
+}
+loadEnv();
+
+const PORT   = process.env.PORT   || 8080;
+const SECRET = process.env.RELAY_SECRET || 'interview-copilot-secret';
+const RELAY_URL = process.env.RELAY_URL || '';
+
 const httpServer = http.createServer((req, res) => {
-  if (req.url === '/phone.html') {
+  if (req.url === '/phone.html' || req.url === '/') {
     const file = path.join(__dirname, 'phone.html');
-    fs.readFile(file, (err, data) => {
+    fs.readFile(file, 'utf8', (err, data) => {
       if (err) { res.writeHead(404); res.end('Not found'); return; }
+      const injected = data
+        .replace(/\{\{RELAY_URL\}\}/g, RELAY_URL)
+        .replace(/\{\{RELAY_SECRET\}\}/g, SECRET);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(data);
+      res.end(injected);
     });
     return;
   }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('Interview Copilot Relay — OK');
+  res.end('Interview Copilot Relay - OK');
 });
 
-// Attach WebSocket server to the HTTP server instead of its own port
 const wss = new WebSocketServer({ server: httpServer });
 
-// Track connected clients by role
 const clients = {
   phone: new Set(),
   electron: new Set(),
@@ -64,27 +64,24 @@ function broadcast(targetRole, payload) {
 
 wss.on('connection', (ws, req) => {
   const url = new URL(req.url, `http://localhost`);
-  const role = url.searchParams.get('role');     // "phone" or "electron"
+  const role = url.searchParams.get('role');
   const secret = url.searchParams.get('secret');
 
-  // Auth check
   if (secret !== SECRET) {
     ws.close(4001, 'Unauthorized');
-    log(`Rejected connection — bad secret (role=${role})`);
+    log(`Rejected connection - bad secret (role=${role})`);
     return;
   }
 
-  // Role check
   if (role !== 'phone' && role !== 'electron') {
     ws.close(4002, 'Unknown role');
-    log(`Rejected connection — unknown role: ${role}`);
+    log(`Rejected connection - unknown role: ${role}`);
     return;
   }
 
   clients[role].add(ws);
   log(`Connected: ${role} (phones=${clients.phone.size}, electrons=${clients.electron.size})`);
 
-  // Notify electron that phone connected (useful for UI status indicator)
   if (role === 'phone') {
     broadcast('electron', { type: 'status', phone_connected: true });
   }
@@ -94,16 +91,14 @@ wss.on('connection', (ws, req) => {
     try {
       msg = JSON.parse(raw);
     } catch {
-      return; // ignore malformed
+      return;
     }
 
-    // Keepalive ping — just pong back
     if (msg.type === 'ping') {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'pong' }));
       return;
     }
 
-    // Phone sends transcript → forward to all electron clients
     if (role === 'phone' && msg.type === 'transcript') {
       const payload = {
         type: 'transcript',
