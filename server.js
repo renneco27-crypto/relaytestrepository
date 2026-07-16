@@ -20,7 +20,19 @@ const SECRET = process.env.RELAY_SECRET || 'interview-copilot-secret';
 
 // HTTP server required by Render free tier — handles health checks
 // AND lets us manually handle the WebSocket upgrade (no separate port needed)
+const fs   = require('fs');
+const path = require('path');
+
 const httpServer = http.createServer((req, res) => {
+  if (req.url === '/phone.html') {
+    const file = path.join(__dirname, 'phone.html');
+    fs.readFile(file, (err, data) => {
+      if (err) { res.writeHead(404); res.end('Not found'); return; }
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('Interview Copilot Relay — OK');
 });
