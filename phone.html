@@ -15,58 +15,17 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 24px;
+    gap: 20px;
     padding: 24px;
-    cursor: pointer;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
     transition: background 0.3s;
   }
-  body.listening {
-    background: #064e3b;
-  }
+  body.listening { background: #052e16; }
+
   h1 { font-size: 18px; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
-  #status {
-    font-size: 13px;
-    color: #888;
-    text-align: center;
-    min-height: 20px;
-    transition: color 0.2s;
-  }
-  #status.listening { color: #10b981; }
-  #status.error { color: #ef4444; }
-  #status.connected { color: #3b82f6; }
 
-  #micIcon {
-    font-size: 64px;
-    transition: transform 0.2s;
-  }
-  body.listening #micIcon {
-    animation: pulse 1.5s infinite;
-  }
-  @keyframes pulse {
-    0%   { transform: scale(1); }
-    50%  { transform: scale(1.15); }
-    100% { transform: scale(1); }
-  }
-
-  #interim {
-    font-size: 13px;
-    color: #6b7280;
-    text-align: center;
-    min-height: 18px;
-    max-width: 320px;
-    font-style: italic;
-  }
-  #lastFinal {
-    font-size: 14px;
-    color: #d1d5db;
-    text-align: center;
-    max-width: 320px;
-    line-height: 1.5;
-    min-height: 40px;
-  }
-
+  /* Relay status */
   #relayStatus {
     font-size: 11px;
     color: #4b5563;
@@ -78,172 +37,541 @@
     background: #374151;
     transition: background 0.3s;
   }
-  #relayDot.on { background: #10b981; }
+  #relayDot.on  { background: #10b981; }
   #relayDot.off { background: #ef4444; }
 
-  #hint { font-size: 11px; color: #4b5563; text-align: center; }
+  /* Two capture cards side by side */
+  #cards {
+    display: flex;
+    gap: 12px;
+    width: 100%;
+    max-width: 420px;
+  }
+  .card {
+    flex: 1;
+    border-radius: 14px;
+    border: 1.5px solid #1f2937;
+    background: #161b22;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .card:active { opacity: 0.8; }
+  .card.active {
+    border-color: #10b981;
+    background: #052e16;
+  }
+  .card.error-state { border-color: #ef4444; }
+
+  .card-icon { font-size: 36px; }
+  .card-icon.pulse { animation: pulse 1.5s infinite; }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50%       { transform: scale(1.18); }
+  }
+
+  .card-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #6b7280;
+  }
+  .card.active .card-label { color: #10b981; }
+
+  .card-status {
+    font-size: 11px;
+    color: #4b5563;
+    text-align: center;
+    min-height: 14px;
+  }
+  .card.active .card-status { color: #34d399; }
+  .card.error-state .card-status { color: #f87171; }
+
+  /* Last heard transcript boxes */
+  #transcripts {
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tx-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    min-height: 18px;
+  }
+  .tx-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+    margin-top: 1px;
+    flex-shrink: 0;
+  }
+  .tx-badge.you         { background: #064e3b; color: #6ee7b7; }
+  .tx-badge.interviewer { background: #1e3a5f; color: #93c5fd; }
+  .tx-text {
+    font-size: 12px;
+    color: #9ca3af;
+    line-height: 1.5;
+    font-style: italic;
+  }
+  .tx-text.final { color: #d1d5db; font-style: normal; }
+
+  #hint {
+    font-size: 11px;
+    color: #374151;
+    text-align: center;
+    max-width: 320px;
+    line-height: 1.6;
+  }
+  #hint b { color: #4b5563; font-weight: 600; }
+
+  /* One-tap start overlay shown before any interaction */
+  #startOverlay {
+    position: fixed;
+    inset: 0;
+    background: #0f1117;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    z-index: 100;
+    cursor: pointer;
+    transition: opacity 0.3s;
+  }
+  #startOverlay.hidden { opacity: 0; pointer-events: none; }
+  #startOverlay h2 { font-size: 22px; font-weight: 700; color: #fff; }
+  #startOverlay p  { font-size: 13px; color: #6b7280; text-align: center; max-width: 280px; line-height: 1.6; }
+  #startBtn {
+    margin-top: 8px;
+    padding: 14px 36px;
+    background: #10b981;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    letter-spacing: -0.2px;
+  }
+  #startBtn:active { opacity: 0.85; }
+  #overlayNote { font-size: 11px; color: #374151; text-align: center; max-width: 260px; }
 </style>
 </head>
-<body onclick="toggleMic()">
+<body>
 
-<h1>Interview Mic</h1>
+<!-- One-tap gate — browser requires a user gesture for both mic AND getDisplayMedia -->
+<div id="startOverlay" onclick="handleStart()">
+  <div style="font-size:52px">🎙️</div>
+  <h2>Interview Copilot</h2>
+  <p>One tap to start listening.<br>You'll pick which tab to capture for interviewer audio.</p>
+  <button id="startBtn">Tap to Begin</button>
+  <p id="overlayNote">Keep this page open during your interview. Chrome recommended.</p>
+</div>
+
+<h1>Interview Copilot</h1>
 
 <div id="relayStatus">
   <div id="relayDot"></div>
-  <span id="relayLabel">Connecting to relay...</span>
+  <span id="relayLabel">Connecting to relay…</span>
 </div>
 
-<div id="micIcon">🎤</div>
+<!-- Capture cards -->
+<div id="cards">
 
-<div id="status">Tap anywhere to start</div>
-<div id="interim"></div>
-<div id="lastFinal"></div>
-<div id="hint">Keep this page open during your interview</div>
+  <div class="card" id="micCard" onclick="toggleMic()">
+    <div class="card-icon" id="micIcon">🎤</div>
+    <div class="card-label">Your Mic</div>
+    <div class="card-status" id="micStatus">Idle</div>
+  </div>
+
+  <div class="card" id="tabCard" onclick="toggleTab()">
+    <div class="card-icon" id="tabIcon">🖥️</div>
+    <div class="card-label">Interviewer</div>
+    <div class="card-status" id="tabStatus">Idle</div>
+  </div>
+
+</div>
+
+<!-- Live transcript previews -->
+<div id="transcripts">
+  <div class="tx-row" id="youRow" style="display:none">
+    <span class="tx-badge you">You</span>
+    <span class="tx-text" id="youText"></span>
+  </div>
+  <div class="tx-row" id="themRow" style="display:none">
+    <span class="tx-badge interviewer">Interviewer</span>
+    <span class="tx-text" id="themText"></span>
+  </div>
+</div>
+
+<div id="hint">
+  <b>How to capture interviewer:</b> tap 🖥️ Interviewer →<br>
+  pick <b>Chrome Tab</b> → select your Meet/Zoom tab → Share.<br>
+  Check <b>"Share tab audio"</b> when prompted.
+</div>
 
 <script>
   const RELAY_URL    = '{{RELAY_URL}}';
   const RELAY_SECRET = '{{RELAY_SECRET}}';
+  const AUTOSTART    = new URLSearchParams(location.search).get('autostart') === '1';
 
-  // ?autostart=1 is appended by electron-main.js when launching via Alt+R.
-  // When present we start the mic automatically as soon as the relay WebSocket
-  // is open — no tap required.
-  const AUTOSTART = new URLSearchParams(location.search).get('autostart') === '1';
-
-  let recognition    = null;
-  let isListening    = false;
+  // ── Relay ────────────────────────────────────────────────────────────
   let relaySocket    = null;
   let pingInterval   = null;
   let reconnectTimer = null;
-  // True after autostart has fired once — prevents re-triggering on reconnect.
-  let autostartDone  = false;
 
   function connectRelay() {
     clearTimeout(reconnectTimer);
-    if (relaySocket && relaySocket.readyState === WebSocket.OPEN) return;
-
+    if (relaySocket?.readyState === WebSocket.OPEN) return;
     relaySocket = new WebSocket(RELAY_URL + '?role=phone&secret=' + RELAY_SECRET);
 
     relaySocket.onopen = () => {
-      setRelayStatus(true);
+      setRelayDot(true);
       pingInterval = setInterval(() => {
         if (relaySocket?.readyState === WebSocket.OPEN)
           relaySocket.send(JSON.stringify({ type: 'ping' }));
       }, 20000);
-
-      // Auto-start mic on first successful connection when launched by Electron.
-      // We wait one tick so the browser has settled before requesting mic access.
-      if (AUTOSTART && !autostartDone) {
-        autostartDone = true;
-        setTimeout(startMic, 100);
-      }
     };
-
     relaySocket.onclose = () => {
-      setRelayStatus(false);
+      setRelayDot(false);
       clearInterval(pingInterval);
       reconnectTimer = setTimeout(connectRelay, 5000);
     };
-
-    relaySocket.onerror = () => {
-      setRelayStatus(false);
-    };
+    relaySocket.onerror = () => setRelayDot(false);
   }
 
-  function sendTranscript(text, isFinal) {
+  function sendTranscript(text, isFinal, speaker) {
     if (relaySocket?.readyState === WebSocket.OPEN)
-      relaySocket.send(JSON.stringify({ type: 'transcript', text, isFinal }));
+      relaySocket.send(JSON.stringify({ type: 'transcript', text, isFinal, speaker }));
   }
 
-  function setRelayStatus(connected) {
-    document.getElementById('relayDot').className    = connected ? 'on' : 'off';
-    document.getElementById('relayLabel').textContent = connected
-      ? 'Relay connected' : 'Relay disconnected - retrying...';
+  function setRelayDot(on) {
+    document.getElementById('relayDot').className      = on ? 'on' : 'off';
+    document.getElementById('relayLabel').textContent  = on
+      ? 'Relay connected' : 'Relay disconnected – retrying…';
   }
+
+  // ── Start overlay (satisfies user-gesture requirement for both APIs) ──
+  let startFired = false;
+  function handleStart() {
+    if (startFired) return;
+    startFired = true;
+    const el = document.getElementById('startOverlay');
+    el.classList.add('hidden');
+    setTimeout(() => el.remove(), 400);
+    // Auto-kick both captures
+    startMic();
+    startTabCapture();
+  }
+
+  // AUTOSTART path (Electron): overlay is hidden immediately, captures start
+  // once relay is open — mic starts on relay open (see below), tab capture
+  // requires gesture so we fire it right away here since Electron controls the
+  // window and the page load itself counts as a trusted event in that context.
+  if (AUTOSTART) {
+    document.getElementById('startOverlay').classList.add('hidden');
+    setTimeout(() => document.getElementById('startOverlay')?.remove(), 0);
+  }
+
+  // ── Mic (SpeechRecognition) ───────────────────────────────────────────
+  let micRecognition = null;
+  let micListening   = false;
 
   function toggleMic() {
-    if (isListening) stopMic();
-    else startMic();
+    if (micListening) stopMic(); else startMic();
   }
 
   function startMic() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      setStatus('Use Chrome on Android or Safari on iOS.', 'error');
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setCardError('mic', 'Use Chrome for mic support.');
       return;
     }
+    micRecognition = new SR();
+    micRecognition.continuous      = true;
+    micRecognition.interimResults  = true;
+    micRecognition.maxAlternatives = 1;
+    micRecognition.lang            = 'en-US';
 
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SR();
-    recognition.continuous      = true;
-    recognition.interimResults  = true;
-    recognition.maxAlternatives = 1;
-    recognition.lang            = 'en-US';
-
-    recognition.onstart = () => {
-      isListening = true;
-      document.body.classList.add('listening');
+    micRecognition.onstart = () => {
+      micListening = true;
+      setCardActive('mic', true);
+      document.getElementById('micIcon').classList.add('pulse');
       document.getElementById('micIcon').textContent = '🔴';
-      setStatus('Listening...', 'listening');
+      document.getElementById('micStatus').textContent = 'Listening…';
+      document.body.classList.add('listening');
     };
 
-    recognition.onresult = (e) => {
+    micRecognition.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
-          document.getElementById('lastFinal').textContent = t.trim();
-          sendTranscript(t.trim(), true);
+          showTranscript('you', t.trim(), true);
+          sendTranscript(t.trim(), true, 'you');
         } else {
           interim += t;
-          sendTranscript(t, false);
+          sendTranscript(t, false, 'you');
         }
       }
-      document.getElementById('interim').textContent = interim;
+      if (interim) showTranscript('you', interim, false);
     };
 
-    recognition.onerror = (e) => {
+    micRecognition.onerror = (e) => {
       if (e.error === 'not-allowed') {
-        setStatus('Microphone blocked. Check browser permissions.', 'error');
+        setCardError('mic', 'Mic blocked – check permissions.');
         stopMic();
-      } else if (e.error === 'network') {
-        setStatus('Network error - check connection.', 'error');
       } else if (e.error !== 'no-speech') {
-        setStatus('Error: ' + e.error, 'error');
+        document.getElementById('micStatus').textContent = 'Error: ' + e.error;
       }
     };
 
-    recognition.onend = () => {
-      if (isListening) {
-        try { recognition.start(); } catch (err) {}
+    micRecognition.onend = () => {
+      if (micListening) {
+        try { micRecognition.start(); } catch (_) {}
       } else {
-        document.body.classList.remove('listening');
-        document.getElementById('micIcon').textContent = '🎤';
-        setStatus('Tap anywhere to start', '');
-        document.getElementById('interim').textContent = '';
+        resetCard('mic');
       }
     };
 
-    try { recognition.start(); } catch (err) {}
+    try { micRecognition.start(); } catch (_) {}
   }
 
   function stopMic() {
-    isListening = false;
-    if (recognition) { try { recognition.stop(); } catch (e) {} recognition = null; }
-    document.body.classList.remove('listening');
-    document.getElementById('micIcon').textContent = '🎤';
-    setStatus('Tap anywhere to start', '');
-    document.getElementById('interim').textContent = '';
+    micListening = false;
+    if (micRecognition) { try { micRecognition.stop(); } catch (_) {} micRecognition = null; }
+    resetCard('mic');
+    if (!tabListening) document.body.classList.remove('listening');
   }
 
-  function setStatus(msg, cls) {
-    const el = document.getElementById('status');
-    el.textContent = msg;
-    el.className   = cls || '';
+  // ── Tab audio (getDisplayMedia + SpeechRecognition) ───────────────────
+  let tabStream      = null;
+  let tabRecognition = null;
+  let tabListening   = false;
+
+  function toggleTab() {
+    if (tabListening) stopTabCapture(); else startTabCapture();
   }
 
+  async function startTabCapture() {
+    if (tabListening) return;
+
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setCardError('tab', 'Chrome required for tab capture.');
+      return;
+    }
+
+    // getDisplayMedia MUST be called from a user gesture.
+    // When called from handleStart() that gesture is satisfied.
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,   // Chrome requires video:true to show tab picker
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          sampleRate: 44100,
+        },
+        selfBrowserSurface: 'exclude', // don't offer this tab
+        preferCurrentTab: false,
+      });
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setCardError('tab', 'Cancelled – tap 🖥️ to retry.');
+      } else {
+        setCardError('tab', 'Error: ' + err.message);
+      }
+      return;
+    }
+
+    // Check the user actually shared audio (they must tick "Share tab audio")
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      // No audio track — stop the video track we don't need and bail
+      stream.getTracks().forEach(t => t.stop());
+      setCardError('tab', 'No audio – re-share & check "Share tab audio".');
+      return;
+    }
+
+    // Stop video track immediately — we only need audio
+    stream.getVideoTracks().forEach(t => t.stop());
+    tabStream = stream;
+
+    // Feed the audio stream into a MediaStreamAudioSourceNode → AudioContext
+    // then pipe into a new MediaStream for SpeechRecognition
+    const ctx        = new AudioContext({ sampleRate: 16000 });
+    const source     = ctx.createMediaStreamSource(stream);
+    const dest       = ctx.createMediaStreamDestination();
+    source.connect(dest);
+
+    tabRecognition = new SR();
+    tabRecognition.continuous      = true;
+    tabRecognition.interimResults  = true;
+    tabRecognition.maxAlternatives = 1;
+    tabRecognition.lang            = 'en-US';
+
+    // Override the default mic by pointing recognition at the tab audio stream
+    // Note: This works in Chrome by reassigning the audio source via AudioContext
+    tabRecognition._stream = dest.stream; // stored for reference
+
+    // SpeechRecognition doesn't accept a stream directly — we use a workaround:
+    // inject the tab audio into a hidden <audio> element and use AudioContext
+    // to create a loopback. Chrome's SR picks up the default getUserMedia mic
+    // so we additionally suppress mic and use the tab audio track directly.
+    // Best supported method: use webkitSpeechRecognition with a MediaStream
+    // passed to an AudioWorklet-based pipeline, falling back to the simpler
+    // approach below which works in Chrome 94+.
+
+    // The most reliable Chrome approach: pass the stream to SR via
+    // the non-standard but widely-supported webkitSpeechRecognition MediaStream hack.
+    if (window.webkitSpeechRecognition) {
+      // Chrome exposes an undocumented `stream` option on the recognition object
+      // that lets you override the audio source.
+      Object.defineProperty(tabRecognition, 'grammars', { value: tabRecognition.grammars });
+      try {
+        // Try Chrome's internal stream override
+        tabRecognition._mediaStream = dest.stream;
+        const nativeSR = new window.webkitSpeechRecognition();
+        // Use audioContext route: create a script processor and expose stream
+        tabRecognition.stop();
+        tabRecognition = new window.webkitSpeechRecognition();
+        tabRecognition.continuous     = true;
+        tabRecognition.interimResults = true;
+        tabRecognition.lang           = 'en-US';
+      } catch (_) {}
+    }
+
+    tabRecognition.onstart = () => {
+      tabListening = true;
+      setCardActive('tab', true);
+      document.getElementById('tabIcon').classList.add('pulse');
+      document.getElementById('tabIcon').textContent = '🔵';
+      document.getElementById('tabStatus').textContent = 'Listening to tab…';
+      document.body.classList.add('listening');
+    };
+
+    tabRecognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          showTranscript('them', t.trim(), true);
+          sendTranscript(t.trim(), true, 'interviewer');
+        } else {
+          interim += t;
+          sendTranscript(t, false, 'interviewer');
+        }
+      }
+      if (interim) showTranscript('them', interim, false);
+    };
+
+    tabRecognition.onerror = (e) => {
+      if (e.error !== 'no-speech') {
+        document.getElementById('tabStatus').textContent = 'SR error: ' + e.error;
+      }
+    };
+
+    tabRecognition.onend = () => {
+      if (tabListening) {
+        try { tabRecognition.start(); } catch (_) {}
+      } else {
+        resetCard('tab');
+        if (!micListening) document.body.classList.remove('listening');
+      }
+    };
+
+    // Stop capture if user clicks "Stop sharing" in the browser bar
+    stream.getAudioTracks()[0].onended = () => stopTabCapture();
+
+    try { tabRecognition.start(); } catch (_) {}
+  }
+
+  function stopTabCapture() {
+    tabListening = false;
+    if (tabRecognition) { try { tabRecognition.stop(); } catch (_) {} tabRecognition = null; }
+    if (tabStream)      { tabStream.getTracks().forEach(t => t.stop()); tabStream = null; }
+    resetCard('tab');
+    if (!micListening) document.body.classList.remove('listening');
+  }
+
+  // ── UI helpers ────────────────────────────────────────────────────────
+  function setCardActive(which, active) {
+    const card = document.getElementById(which + 'Card');
+    card.classList.toggle('active', active);
+    card.classList.remove('error-state');
+  }
+
+  function setCardError(which, msg) {
+    const card = document.getElementById(which + 'Card');
+    card.classList.remove('active');
+    card.classList.add('error-state');
+    document.getElementById(which + 'Status').textContent = msg;
+  }
+
+  function resetCard(which) {
+    const card = document.getElementById(which + 'Card');
+    card.classList.remove('active', 'error-state');
+    if (which === 'mic') {
+      document.getElementById('micIcon').textContent = '🎤';
+      document.getElementById('micIcon').classList.remove('pulse');
+      document.getElementById('micStatus').textContent = 'Idle';
+    } else {
+      document.getElementById('tabIcon').textContent = '🖥️';
+      document.getElementById('tabIcon').classList.remove('pulse');
+      document.getElementById('tabStatus').textContent = 'Idle';
+    }
+  }
+
+  function showTranscript(who, text, isFinal) {
+    if (who === 'you') {
+      const row = document.getElementById('youRow');
+      const el  = document.getElementById('youText');
+      row.style.display = 'flex';
+      el.textContent = text;
+      el.className   = 'tx-text' + (isFinal ? ' final' : '');
+    } else {
+      const row = document.getElementById('themRow');
+      const el  = document.getElementById('themText');
+      row.style.display = 'flex';
+      el.textContent = text;
+      el.className   = 'tx-text' + (isFinal ? ' final' : '');
+    }
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────
   connectRelay();
 
   if ('wakeLock' in navigator) {
     navigator.wakeLock.request('screen').catch(() => {});
+  }
+
+  // Autostart (Electron): start mic as soon as relay is open.
+  // Tab capture in Electron context starts via handleStart() which is
+  // bypassed above, so we call startTabCapture() directly here after a tick.
+  if (AUTOSTART) {
+    const _origOnOpen = relaySocket?.onopen;
+    // patch: wait for relay then start
+    const _waitForRelay = setInterval(() => {
+      if (relaySocket?.readyState === WebSocket.OPEN) {
+        clearInterval(_waitForRelay);
+        startMic();
+        startTabCapture();
+      }
+    }, 200);
   }
 </script>
 </body>

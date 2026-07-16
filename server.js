@@ -126,11 +126,13 @@ wss.on('connection', (ws, req) => {
         type:    'transcript',
         text:    msg.text    ?? '',
         isFinal: msg.isFinal ?? false,
+        // 'you' = candidate mic, 'interviewer' = tab audio capture
+        speaker: msg.speaker ?? 'you',
         from:    'phone',
         ts:      Date.now(),
       };
       broadcast('electron', payload);
-      log(`Transcript (final=${payload.isFinal}): "${payload.text.slice(0, 60)}"`);
+      log(`Transcript [${payload.speaker}] (final=${payload.isFinal}): "${payload.text.slice(0, 60)}"`);
     }
   });
 
