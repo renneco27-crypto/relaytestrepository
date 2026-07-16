@@ -104,11 +104,18 @@
   const RELAY_URL    = '{{RELAY_URL}}';
   const RELAY_SECRET = '{{RELAY_SECRET}}';
 
+  // ?autostart=1 is appended by electron-main.js when launching via Alt+R.
+  // When present we start the mic automatically as soon as the relay WebSocket
+  // is open — no tap required.
+  const AUTOSTART = new URLSearchParams(location.search).get('autostart') === '1';
+
   let recognition    = null;
   let isListening    = false;
   let relaySocket    = null;
   let pingInterval   = null;
   let reconnectTimer = null;
+  // True after autostart has fired once — prevents re-triggering on reconnect.
+  let autostartDone  = false;
 
   function connectRelay() {
     clearTimeout(reconnectTimer);
@@ -122,6 +129,13 @@
         if (relaySocket?.readyState === WebSocket.OPEN)
           relaySocket.send(JSON.stringify({ type: 'ping' }));
       }, 20000);
+
+      // Auto-start mic on first successful connection when launched by Electron.
+      // We wait one tick so the browser has settled before requesting mic access.
+      if (AUTOSTART && !autostartDone) {
+        autostartDone = true;
+        setTimeout(startMic, 100);
+      }
     };
 
     relaySocket.onclose = () => {
@@ -141,7 +155,7 @@
   }
 
   function setRelayStatus(connected) {
-    document.getElementById('relayDot').className   = connected ? 'on' : 'off';
+    document.getElementById('relayDot').className    = connected ? 'on' : 'off';
     document.getElementById('relayLabel').textContent = connected
       ? 'Relay connected' : 'Relay disconnected - retrying...';
   }
@@ -222,8 +236,8 @@
 
   function setStatus(msg, cls) {
     const el = document.getElementById('status');
-    el.textContent  = msg;
-    el.className    = cls || '';
+    el.textContent = msg;
+    el.className   = cls || '';
   }
 
   connectRelay();
