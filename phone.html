@@ -40,6 +40,23 @@
   #relayDot.on  { background: #10b981; }
   #relayDot.off { background: #ef4444; }
 
+  /* Active mic indicator */
+  #activeMic {
+    font-size: 12px;
+    color: #6b7280;
+    text-align: center;
+    padding: 8px 16px;
+    background: #161b22;
+    border: 1.5px solid #1f2937;
+    border-radius: 10px;
+    max-width: 420px;
+    width: 100%;
+    transition: border-color 0.3s, color 0.3s;
+  }
+  #activeMic.cable { border-color: #3b82f6; color: #93c5fd; }
+  #activeMic.physical { border-color: #10b981; color: #6ee7b7; }
+  #activeMic.unknown { border-color: #f59e0b; color: #fcd34d; }
+
   /* Two capture cards side by side */
   #cards {
     display: flex;
@@ -67,6 +84,10 @@
     background: #052e16;
   }
   .card.error-state { border-color: #ef4444; }
+  .card.disabled {
+    opacity: 0.35;
+    pointer-events: none;
+  }
 
   .card-icon { font-size: 36px; }
   .card-icon.pulse { animation: pulse 1.5s infinite; }
@@ -92,60 +113,6 @@
   }
   .card.active .card-status { color: #34d399; }
   .card.error-state .card-status { color: #f87171; }
-
-  /* Device selector dropdown */
-  .device-select-wrap {
-    width: 100%;
-    max-width: 420px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .device-select-wrap label {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
-    color: #6b7280;
-  }
-  .device-select-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  #audioDeviceSelect {
-    flex: 1;
-    padding: 10px 12px;
-    background: #161b22;
-    color: #e0e0e0;
-    border: 1.5px solid #1f2937;
-    border-radius: 10px;
-    font-size: 13px;
-    font-family: inherit;
-    outline: none;
-    appearance: none;
-    -webkit-appearance: none;
-    cursor: pointer;
-    transition: border-color 0.2s;
-  }
-  #audioDeviceSelect:focus { border-color: #3b82f6; }
-  #refreshDevicesBtn {
-    width: 36px; height: 36px;
-    border: 1.5px solid #1f2937;
-    border-radius: 10px;
-    background: #161b22;
-    color: #9ca3af;
-    font-size: 16px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: border-color 0.2s, color 0.2s;
-    flex-shrink: 0;
-  }
-  #refreshDevicesBtn:hover { border-color: #3b82f6; color: #e0e0e0; }
-  #refreshDevicesBtn.spinning { animation: spin 0.6s ease; }
-  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 
   /* Last heard transcript boxes */
   #transcripts {
@@ -182,16 +149,34 @@
   }
   .tx-text.final { color: #d1d5db; font-style: normal; }
 
+  /* Setup instructions box */
   #hint {
     font-size: 11px;
     color: #374151;
     text-align: center;
-    max-width: 340px;
-    line-height: 1.6;
+    max-width: 380px;
+    line-height: 1.7;
   }
   #hint b { color: #4b5563; font-weight: 600; }
+  #hint .step { color: #6b7280; }
+  #hint .highlight { color: #60a5fa; font-weight: 600; }
 
-  /* One-tap start overlay shown before any interaction */
+  /* Mode badge */
+  #modeBadge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: #1e3a5f;
+    color: #93c5fd;
+  }
+  #modeBadge.mode-mic { background: #064e3b; color: #6ee7b7; }
+  #modeBadge.mode-interviewer { background: #1e3a5f; color: #93c5fd; }
+  #modeBadge.mode-both { background: #3b1f5e; color: #c4b5fd; }
+
+  /* One-tap start overlay */
   #startOverlay {
     position: fixed;
     inset: 0;
@@ -207,7 +192,7 @@
   }
   #startOverlay.hidden { opacity: 0; pointer-events: none; }
   #startOverlay h2 { font-size: 22px; font-weight: 700; color: #fff; }
-  #startOverlay p  { font-size: 13px; color: #6b7280; text-align: center; max-width: 280px; line-height: 1.6; }
+  #startOverlay p  { font-size: 13px; color: #6b7280; text-align: center; max-width: 300px; line-height: 1.6; }
   #startBtn {
     margin-top: 8px;
     padding: 14px 36px;
@@ -221,41 +206,34 @@
     letter-spacing: -0.2px;
   }
   #startBtn:active { opacity: 0.85; }
-  #overlayNote { font-size: 11px; color: #374151; text-align: center; max-width: 260px; }
+  #overlayNote { font-size: 11px; color: #374151; text-align: center; max-width: 300px; }
 </style>
 </head>
 <body>
 
-<!-- One-tap gate — browser requires a user gesture for mic -->
+<!-- One-tap gate -->
 <div id="startOverlay" onclick="handleStart()">
   <div style="font-size:52px">🎙️</div>
   <h2>Interview Copilot</h2>
-  <p>One tap to start listening.<br>Select your VB-Cable device below to capture interviewer audio.</p>
+  <p id="overlayDesc">One tap to start. Chrome will ask for mic permission — make sure you pick the right device.</p>
   <button id="startBtn">Tap to Begin</button>
-  <p id="overlayNote">Keep this page open during your interview. Chrome recommended.</p>
+  <p id="overlayNote"></p>
 </div>
 
 <h1>Interview Copilot</h1>
+
+<div id="modeBadge"></div>
 
 <div id="relayStatus">
   <div id="relayDot"></div>
   <span id="relayLabel">Connecting to relay…</span>
 </div>
 
-<!-- Audio device selector for the Interviewer source -->
-<div class="device-select-wrap">
-  <label for="audioDeviceSelect">🔊 Interviewer Audio Source</label>
-  <div class="device-select-row">
-    <select id="audioDeviceSelect">
-      <option value="">-- grant mic permission first --</option>
-    </select>
-    <button id="refreshDevicesBtn" onclick="refreshDeviceList()" title="Refresh device list">🔄</button>
-  </div>
-</div>
+<!-- Shows which mic Chrome is actually using -->
+<div id="activeMic">Detecting mic…</div>
 
 <!-- Capture cards -->
 <div id="cards">
-
   <div class="card" id="micCard" onclick="toggleMic()">
     <div class="card-icon" id="micIcon">🎤</div>
     <div class="card-label">Your Mic</div>
@@ -267,7 +245,6 @@
     <div class="card-label">Interviewer</div>
     <div class="card-status" id="tabStatus">Idle</div>
   </div>
-
 </div>
 
 <!-- Live transcript previews -->
@@ -282,18 +259,111 @@
   </div>
 </div>
 
-<div id="hint">
-  <b>How to capture interviewer audio:</b><br>
-  1. Install <b>VB-Cable</b> and set it as your default playback device.<br>
-  2. Select <b>CABLE Output (VB-Audio Virtual Cable)</b> from the dropdown above.<br>
-  3. Tap the 🖥️ <b>Interviewer</b> card to start transcribing.<br>
-  4. In <b>Google Meet</b>, keep your real mic selected for your own voice.
-</div>
+<div id="hint"></div>
 
 <script>
   const RELAY_URL    = '{{RELAY_URL}}';
   const RELAY_SECRET = '{{RELAY_SECRET}}';
-  const AUTOSTART    = new URLSearchParams(location.search).get('autostart') === '1';
+  const params       = new URLSearchParams(location.search);
+  const AUTOSTART    = params.get('autostart') === '1';
+  const MODE         = params.get('mode') || 'both'; // 'mic', 'interviewer', or 'both'
+
+  // ── Mode setup ─────────────────────────────────────────────────────────
+  // Chrome SpeechRecognition ALWAYS uses one mic — whatever Chrome has set
+  // for this site. You CANNOT have two SpeechRecognition instances on the
+  // same page using different audio devices.
+  //
+  // Solution: open the page in TWO windows with different Chrome profiles
+  // (or one normal + one incognito). Each window sets a different mic in
+  // Chrome's site settings.
+  //
+  //   Window 1: /?mode=mic           → Chrome mic = physical mic
+  //   Window 2: /?mode=interviewer   → Chrome mic = CABLE Output (VB-Cable)
+  //
+  // Both connect to the same relay. Transcripts are labelled correctly.
+
+  function setupMode() {
+    const badge = document.getElementById('modeBadge');
+    const hint  = document.getElementById('hint');
+    const overlayDesc = document.getElementById('overlayDesc');
+    const overlayNote = document.getElementById('overlayNote');
+
+    if (MODE === 'mic') {
+      badge.textContent = '🎤 Your Mic Mode';
+      badge.className = 'mode-mic';
+      document.getElementById('tabCard').classList.add('disabled');
+      overlayDesc.innerHTML = 'This window captures <b>your voice</b>.<br>When Chrome asks, pick your <b>physical microphone</b>.';
+      overlayNote.innerHTML = 'Open a second window with <b>?mode=interviewer</b> for the other person\'s audio.';
+      hint.innerHTML =
+        '<b>🎤 Your Mic Mode</b><br>' +
+        'This window transcribes <b>your voice</b> using your physical mic.<br>' +
+        'Chrome is using the mic shown above ↑';
+    } else if (MODE === 'interviewer') {
+      badge.textContent = '🖥️ Interviewer Mode';
+      badge.className = 'mode-interviewer';
+      document.getElementById('micCard').classList.add('disabled');
+      overlayDesc.innerHTML = 'This window captures <b>interviewer audio</b> via VB-Cable.<br>When Chrome asks, pick <b>CABLE Output (VB-Audio Virtual Cable)</b>.';
+      overlayNote.innerHTML = '⚠️ Open this in <b>Incognito</b> or a <b>different Chrome profile</b> so it gets its own mic setting.';
+      hint.innerHTML =
+        '<b>🖥️ Interviewer Mode</b><br>' +
+        'This window transcribes <b>interviewer audio</b> from VB-Cable.<br><br>' +
+        '<span class="step">1.</span> Set <span class="highlight">CABLE Input</span> as your <b>default speaker</b> in Windows Sound settings<br>' +
+        '<span class="step">2.</span> In Google Meet → use your <b>real mic</b> for your voice,<br>' +
+        '&nbsp;&nbsp;&nbsp;and set speaker to <span class="highlight">CABLE Input</span><br>' +
+        '<span class="step">3.</span> Chrome above should show <span class="highlight">CABLE Output</span> as the active mic<br><br>' +
+        'Not seeing CABLE Output? Click the 🔒 icon in the address bar →<br>Site settings → Microphone → select <b>CABLE Output</b> → reload.';
+    } else {
+      badge.textContent = '⚡ Both Channels';
+      badge.className = 'mode-both';
+      overlayDesc.innerHTML =
+        'One tap to start.<br><br>' +
+        '⚠️ <b>Important:</b> Chrome can only use ONE mic per window.<br>' +
+        'For best results, open <b>two separate windows</b>:';
+      overlayNote.innerHTML =
+        'Window 1: <b>?mode=mic</b> (normal Chrome)<br>' +
+        'Window 2: <b>?mode=interviewer</b> (Incognito / different profile)';
+      hint.innerHTML =
+        '<b>⚡ Combined Mode</b><br>' +
+        'Both cards use the <b>same mic</b> (Chrome\'s default for this site).<br>' +
+        'Transcripts will be labelled differently but come from the same source.<br><br>' +
+        'For <b>true dual-source capture</b>, use two windows:<br>' +
+        '<span class="highlight">?mode=mic</span> + <span class="highlight">?mode=interviewer</span>';
+    }
+  }
+
+  // ── Detect which mic Chrome is actually using ──────────────────────────
+  let detectedMicLabel = '';
+
+  async function detectActiveMic() {
+    const el = document.getElementById('activeMic');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const track  = stream.getAudioTracks()[0];
+      const label  = track.label || 'Unknown device';
+      detectedMicLabel = label;
+      track.stop();
+
+      el.textContent = '🎧 Chrome is using: ' + label;
+
+      const lower = label.toLowerCase();
+      if (lower.includes('cable') || lower.includes('vb-audio') || lower.includes('virtual')) {
+        el.className = 'cable';
+        if (MODE === 'mic') {
+          el.textContent += ' ⚠️ (This is VB-Cable — you need your physical mic here!)';
+          el.className = 'unknown';
+        }
+      } else {
+        el.className = 'physical';
+        if (MODE === 'interviewer') {
+          el.textContent += ' ⚠️ (This is your physical mic — you need VB-Cable here!)';
+          el.className = 'unknown';
+        }
+      }
+    } catch (err) {
+      el.textContent = '⚠️ Mic access denied — grant permission first';
+      el.className = 'unknown';
+    }
+  }
 
   // ── Relay ────────────────────────────────────────────────────────────
   let relaySocket    = null;
@@ -331,70 +401,7 @@
       ? 'Relay connected' : 'Relay disconnected – retrying…';
   }
 
-  // ── Audio device enumeration ─────────────────────────────────────────
-  let audioDevices = [];
-
-  async function refreshDeviceList() {
-    const btn = document.getElementById('refreshDevicesBtn');
-    btn.classList.add('spinning');
-    setTimeout(() => btn.classList.remove('spinning'), 600);
-
-    try {
-      // We need getUserMedia permission before enumerateDevices shows labels
-      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      tempStream.getTracks().forEach(t => t.stop()); // release immediately
-    } catch (err) {
-      console.warn('Could not get mic permission for device enumeration:', err);
-    }
-
-    try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      audioDevices = devices.filter(d => d.kind === 'audioinput');
-
-      const select = document.getElementById('audioDeviceSelect');
-      const previousValue = select.value;
-      select.innerHTML = '';
-
-      if (audioDevices.length === 0) {
-        select.innerHTML = '<option value="">No audio input devices found</option>';
-        return;
-      }
-
-      let cableDeviceId = null;
-
-      audioDevices.forEach((dev, i) => {
-        const opt = document.createElement('option');
-        opt.value = dev.deviceId;
-        // Show label or a fallback name
-        opt.textContent = dev.label || `Audio Input ${i + 1}`;
-        select.appendChild(opt);
-
-        // Auto-select VB-Cable if found
-        if (dev.label.toLowerCase().includes('cable output') ||
-            dev.label.toLowerCase().includes('vb-audio') ||
-            dev.label.toLowerCase().includes('virtual cable')) {
-          cableDeviceId = dev.deviceId;
-        }
-      });
-
-      // Restore previous selection, or auto-select cable, or pick first
-      if (previousValue && audioDevices.some(d => d.deviceId === previousValue)) {
-        select.value = previousValue;
-      } else if (cableDeviceId) {
-        select.value = cableDeviceId;
-      }
-
-    } catch (err) {
-      console.error('Error enumerating devices:', err);
-    }
-  }
-
-  // Re-populate when devices change (e.g. plugging in a headset)
-  if (navigator.mediaDevices?.addEventListener) {
-    navigator.mediaDevices.addEventListener('devicechange', refreshDeviceList);
-  }
-
-  // ── Start overlay (satisfies user-gesture requirement) ───────────────
+  // ── Start overlay ───────────────────────────────────────────────────
   let startFired = false;
   async function handleStart() {
     if (startFired) return;
@@ -403,11 +410,12 @@
     el.classList.add('hidden');
     setTimeout(() => el.remove(), 400);
 
-    // Populate device list (needs the user-gesture for getUserMedia)
-    await refreshDeviceList();
+    // Detect which mic Chrome is actually using
+    await detectActiveMic();
 
-    // Auto-kick mic capture
-    startMic();
+    // Auto-start the appropriate card based on mode
+    if (MODE === 'mic' || MODE === 'both') startMic();
+    if (MODE === 'interviewer') startInterviewer();
   }
 
   // ── Mic (SpeechRecognition — your own voice) ─────────────────────────
@@ -415,6 +423,7 @@
   let micListening   = false;
 
   function toggleMic() {
+    if (MODE === 'interviewer') return; // disabled in interviewer mode
     if (micListening) stopMic(); else startMic();
   }
 
@@ -478,91 +487,43 @@
     micListening = false;
     if (micRecognition) { try { micRecognition.stop(); } catch (_) {} micRecognition = null; }
     resetCard('mic');
-    if (!tabListening) document.body.classList.remove('listening');
+    if (!interviewerListening) document.body.classList.remove('listening');
   }
 
-  // ── Interviewer audio (getUserMedia with selected device + SpeechRecognition) ──
-  let tabStream      = null;
-  let tabRecognition = null;
-  let tabListening   = false;
+  // ── Interviewer (SpeechRecognition — VB-Cable audio) ──────────────────
+  // This uses the SAME SpeechRecognition API. It works because this window
+  // has its Chrome mic set to VB-Cable (via site settings / different profile).
+  let interviewerRecognition = null;
+  let interviewerListening   = false;
 
   function toggleTab() {
-    if (tabListening) stopTabCapture(); else startTabCapture();
+    if (MODE === 'mic') return; // disabled in mic mode
+    if (interviewerListening) stopInterviewer(); else startInterviewer();
   }
 
-  async function startTabCapture() {
-    if (tabListening) return;
-
+  function startInterviewer() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
       setCardError('tab', 'Chrome required for speech recognition.');
       return;
     }
 
-    // Get the selected audio device from the dropdown
-    const select = document.getElementById('audioDeviceSelect');
-    const selectedDeviceId = select.value;
+    interviewerRecognition = new SR();
+    interviewerRecognition.continuous      = true;
+    interviewerRecognition.interimResults  = true;
+    interviewerRecognition.maxAlternatives = 1;
+    interviewerRecognition.lang            = 'en-US';
 
-    if (!selectedDeviceId) {
-      setCardError('tab', 'Select an audio device first.');
-      return;
-    }
-
-    // Acquire the audio stream from the selected device
-    let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId: { exact: selectedDeviceId },
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        }
-      });
-    } catch (err) {
-      if (err.name === 'NotAllowedError') {
-        setCardError('tab', 'Permission denied – allow mic access.');
-      } else if (err.name === 'NotFoundError') {
-        setCardError('tab', 'Device not found – refresh list & retry.');
-      } else {
-        setCardError('tab', 'Error: ' + err.message);
-      }
-      return;
-    }
-
-    tabStream = stream;
-
-    // IMPORTANT: Chrome's SpeechRecognition always uses the OS default
-    // recording device. To make it hear the VB-Cable, you must set
-    // CABLE Output as the DEFAULT RECORDING DEVICE in Windows Sound settings,
-    // OR use the per-app audio settings to route Chrome's mic input to VB-Cable.
-    //
-    // The getUserMedia call above ensures we hold the stream open so the
-    // device stays active. SpeechRecognition will then pick up audio from
-    // whatever the OS default recording device is.
-    //
-    // For best results: set VB-Cable as Chrome's mic input via
-    // Windows Settings → System → Sound → App volume and device preferences.
-
-    tabRecognition = new SR();
-    tabRecognition.continuous      = true;
-    tabRecognition.interimResults  = true;
-    tabRecognition.maxAlternatives = 1;
-    tabRecognition.lang            = 'en-US';
-
-    tabRecognition.onstart = () => {
-      tabListening = true;
+    interviewerRecognition.onstart = () => {
+      interviewerListening = true;
       setCardActive('tab', true);
       document.getElementById('tabIcon').classList.add('pulse');
       document.getElementById('tabIcon').textContent = '🔵';
-
-      // Show the device name in the status
-      const deviceName = select.options[select.selectedIndex]?.text || 'device';
-      document.getElementById('tabStatus').textContent = 'Listening via ' + deviceName;
+      document.getElementById('tabStatus').textContent = 'Listening via ' + (detectedMicLabel || 'Chrome mic');
       document.body.classList.add('listening');
     };
 
-    tabRecognition.onresult = (e) => {
+    interviewerRecognition.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
@@ -577,31 +538,30 @@
       if (interim) showTranscript('them', interim, false);
     };
 
-    tabRecognition.onerror = (e) => {
-      if (e.error !== 'no-speech') {
+    interviewerRecognition.onerror = (e) => {
+      if (e.error === 'not-allowed') {
+        setCardError('tab', 'Mic blocked – check site settings.');
+        stopInterviewer();
+      } else if (e.error !== 'no-speech') {
         document.getElementById('tabStatus').textContent = 'SR error: ' + e.error;
       }
     };
 
-    tabRecognition.onend = () => {
-      if (tabListening) {
-        try { tabRecognition.start(); } catch (_) {}
+    interviewerRecognition.onend = () => {
+      if (interviewerListening) {
+        try { interviewerRecognition.start(); } catch (_) {}
       } else {
         resetCard('tab');
         if (!micListening) document.body.classList.remove('listening');
       }
     };
 
-    // If the stream track ends (e.g. device disconnected), stop capture
-    stream.getAudioTracks()[0].onended = () => stopTabCapture();
-
-    try { tabRecognition.start(); } catch (_) {}
+    try { interviewerRecognition.start(); } catch (_) {}
   }
 
-  function stopTabCapture() {
-    tabListening = false;
-    if (tabRecognition) { try { tabRecognition.stop(); } catch (_) {} tabRecognition = null; }
-    if (tabStream)      { tabStream.getTracks().forEach(t => t.stop()); tabStream = null; }
+  function stopInterviewer() {
+    interviewerListening = false;
+    if (interviewerRecognition) { try { interviewerRecognition.stop(); } catch (_) {} interviewerRecognition = null; }
     resetCard('tab');
     if (!micListening) document.body.classList.remove('listening');
   }
@@ -651,9 +611,9 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────
+  setupMode();
 
   if (AUTOSTART) {
-    // Hide and remove the overlay immediately — no tap needed.
     const overlay = document.getElementById('startOverlay');
     if (overlay) { overlay.classList.add('hidden'); setTimeout(() => overlay.remove(), 0); }
   }
@@ -665,20 +625,18 @@
   }
 
   if (AUTOSTART) {
-    // Patch the relay's onopen so we kick both captures the moment the
-    // WebSocket handshake completes.  We wrap rather than replace so the
-    // original handler (setRelayDot) still runs.
     const _prevOnOpen = relaySocket.onopen;
     relaySocket.onopen = async (evt) => {
       if (_prevOnOpen) _prevOnOpen.call(relaySocket, evt);
-      await refreshDeviceList();
-      startMic();
-      // Don't auto-start tab capture in AUTOSTART — user should pick the device first
+      await detectActiveMic();
+      if (MODE === 'mic' || MODE === 'both') startMic();
+      if (MODE === 'interviewer') startInterviewer();
     };
-    // If the socket connected synchronously before we patched (shouldn't
-    // happen, but be safe), fire immediately.
     if (relaySocket.readyState === WebSocket.OPEN) {
-      refreshDeviceList().then(() => startMic());
+      detectActiveMic().then(() => {
+        if (MODE === 'mic' || MODE === 'both') startMic();
+        if (MODE === 'interviewer') startInterviewer();
+      });
     }
   }
 </script>
