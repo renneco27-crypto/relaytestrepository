@@ -277,15 +277,6 @@
     startTabCapture();
   }
 
-  // AUTOSTART path (Electron): overlay is hidden immediately, captures start
-  // once relay is open — mic starts on relay open (see below), tab capture
-  // requires gesture so we fire it right away here since Electron controls the
-  // window and the page load itself counts as a trusted event in that context.
-  if (AUTOSTART) {
-    document.getElementById('startOverlay').classList.add('hidden');
-    setTimeout(() => document.getElementById('startOverlay')?.remove(), 0);
-  }
-
   // ── Mic (SpeechRecognition) ───────────────────────────────────────────
   let micRecognition = null;
   let micListening   = false;
@@ -553,25 +544,37 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────
+
+  if (AUTOSTART) {
+    // Hide and remove the overlay immediately — no tap needed.
+    // Electron (Edge) satisfies the gesture requirement at page-load time,
+    // so getDisplayMedia and getUserMedia can be called without a click.
+    const overlay = document.getElementById('startOverlay');
+    if (overlay) { overlay.classList.add('hidden'); setTimeout(() => overlay.remove(), 0); }
+  }
+
   connectRelay();
 
   if ('wakeLock' in navigator) {
     navigator.wakeLock.request('screen').catch(() => {});
   }
 
-  // Autostart (Electron): start mic as soon as relay is open.
-  // Tab capture in Electron context starts via handleStart() which is
-  // bypassed above, so we call startTabCapture() directly here after a tick.
   if (AUTOSTART) {
-    const _origOnOpen = relaySocket?.onopen;
-    // patch: wait for relay then start
-    const _waitForRelay = setInterval(() => {
-      if (relaySocket?.readyState === WebSocket.OPEN) {
-        clearInterval(_waitForRelay);
-        startMic();
-        startTabCapture();
-      }
-    }, 200);
+    // Patch the relay's onopen so we kick both captures the moment the
+    // WebSocket handshake completes.  We wrap rather than replace so the
+    // original handler (setRelayDot) still runs.
+    const _prevOnOpen = relaySocket.onopen;
+    relaySocket.onopen = (evt) => {
+      if (_prevOnOpen) _prevOnOpen.call(relaySocket, evt);
+      startMic();
+      startTabCapture();
+    };
+    // If the socket connected synchronously before we patched (shouldn't
+    // happen, but be safe), fire immediately.
+    if (relaySocket.readyState === WebSocket.OPEN) {
+      startMic();
+      startTabCapture();
+    }
   }
 </script>
 </body>
