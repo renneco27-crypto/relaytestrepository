@@ -93,6 +93,60 @@
   .card.active .card-status { color: #34d399; }
   .card.error-state .card-status { color: #f87171; }
 
+  /* Device selector dropdown */
+  .device-select-wrap {
+    width: 100%;
+    max-width: 420px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .device-select-wrap label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: #6b7280;
+  }
+  .device-select-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  #audioDeviceSelect {
+    flex: 1;
+    padding: 10px 12px;
+    background: #161b22;
+    color: #e0e0e0;
+    border: 1.5px solid #1f2937;
+    border-radius: 10px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  #audioDeviceSelect:focus { border-color: #3b82f6; }
+  #refreshDevicesBtn {
+    width: 36px; height: 36px;
+    border: 1.5px solid #1f2937;
+    border-radius: 10px;
+    background: #161b22;
+    color: #9ca3af;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.2s, color 0.2s;
+    flex-shrink: 0;
+  }
+  #refreshDevicesBtn:hover { border-color: #3b82f6; color: #e0e0e0; }
+  #refreshDevicesBtn.spinning { animation: spin 0.6s ease; }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
   /* Last heard transcript boxes */
   #transcripts {
     width: 100%;
@@ -132,7 +186,7 @@
     font-size: 11px;
     color: #374151;
     text-align: center;
-    max-width: 320px;
+    max-width: 340px;
     line-height: 1.6;
   }
   #hint b { color: #4b5563; font-weight: 600; }
@@ -172,11 +226,11 @@
 </head>
 <body>
 
-<!-- One-tap gate — browser requires a user gesture for both mic AND getDisplayMedia -->
+<!-- One-tap gate — browser requires a user gesture for mic -->
 <div id="startOverlay" onclick="handleStart()">
   <div style="font-size:52px">🎙️</div>
   <h2>Interview Copilot</h2>
-  <p>One tap to start listening.<br>You'll pick which tab to capture for interviewer audio.</p>
+  <p>One tap to start listening.<br>Select your VB-Cable device below to capture interviewer audio.</p>
   <button id="startBtn">Tap to Begin</button>
   <p id="overlayNote">Keep this page open during your interview. Chrome recommended.</p>
 </div>
@@ -186,6 +240,17 @@
 <div id="relayStatus">
   <div id="relayDot"></div>
   <span id="relayLabel">Connecting to relay…</span>
+</div>
+
+<!-- Audio device selector for the Interviewer source -->
+<div class="device-select-wrap">
+  <label for="audioDeviceSelect">🔊 Interviewer Audio Source</label>
+  <div class="device-select-row">
+    <select id="audioDeviceSelect">
+      <option value="">-- grant mic permission first --</option>
+    </select>
+    <button id="refreshDevicesBtn" onclick="refreshDeviceList()" title="Refresh device list">🔄</button>
+  </div>
 </div>
 
 <!-- Capture cards -->
@@ -218,9 +283,11 @@
 </div>
 
 <div id="hint">
-  <b>How to capture interviewer:</b> tap 🖥️ Interviewer →<br>
-  pick <b>Chrome Tab</b> → select your Meet/Zoom tab → Share.<br>
-  Check <b>"Share tab audio"</b> when prompted.
+  <b>How to capture interviewer audio:</b><br>
+  1. Install <b>VB-Cable</b> and set it as your default playback device.<br>
+  2. Select <b>CABLE Output (VB-Audio Virtual Cable)</b> from the dropdown above.<br>
+  3. Tap the 🖥️ <b>Interviewer</b> card to start transcribing.<br>
+  4. In <b>Google Meet</b>, keep your real mic selected for your own voice.
 </div>
 
 <script>
@@ -264,20 +331,86 @@
       ? 'Relay connected' : 'Relay disconnected – retrying…';
   }
 
-  // ── Start overlay (satisfies user-gesture requirement for both APIs) ──
+  // ── Audio device enumeration ─────────────────────────────────────────
+  let audioDevices = [];
+
+  async function refreshDeviceList() {
+    const btn = document.getElementById('refreshDevicesBtn');
+    btn.classList.add('spinning');
+    setTimeout(() => btn.classList.remove('spinning'), 600);
+
+    try {
+      // We need getUserMedia permission before enumerateDevices shows labels
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tempStream.getTracks().forEach(t => t.stop()); // release immediately
+    } catch (err) {
+      console.warn('Could not get mic permission for device enumeration:', err);
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      audioDevices = devices.filter(d => d.kind === 'audioinput');
+
+      const select = document.getElementById('audioDeviceSelect');
+      const previousValue = select.value;
+      select.innerHTML = '';
+
+      if (audioDevices.length === 0) {
+        select.innerHTML = '<option value="">No audio input devices found</option>';
+        return;
+      }
+
+      let cableDeviceId = null;
+
+      audioDevices.forEach((dev, i) => {
+        const opt = document.createElement('option');
+        opt.value = dev.deviceId;
+        // Show label or a fallback name
+        opt.textContent = dev.label || `Audio Input ${i + 1}`;
+        select.appendChild(opt);
+
+        // Auto-select VB-Cable if found
+        if (dev.label.toLowerCase().includes('cable output') ||
+            dev.label.toLowerCase().includes('vb-audio') ||
+            dev.label.toLowerCase().includes('virtual cable')) {
+          cableDeviceId = dev.deviceId;
+        }
+      });
+
+      // Restore previous selection, or auto-select cable, or pick first
+      if (previousValue && audioDevices.some(d => d.deviceId === previousValue)) {
+        select.value = previousValue;
+      } else if (cableDeviceId) {
+        select.value = cableDeviceId;
+      }
+
+    } catch (err) {
+      console.error('Error enumerating devices:', err);
+    }
+  }
+
+  // Re-populate when devices change (e.g. plugging in a headset)
+  if (navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', refreshDeviceList);
+  }
+
+  // ── Start overlay (satisfies user-gesture requirement) ───────────────
   let startFired = false;
-  function handleStart() {
+  async function handleStart() {
     if (startFired) return;
     startFired = true;
     const el = document.getElementById('startOverlay');
     el.classList.add('hidden');
     setTimeout(() => el.remove(), 400);
-    // Auto-kick both captures
+
+    // Populate device list (needs the user-gesture for getUserMedia)
+    await refreshDeviceList();
+
+    // Auto-kick mic capture
     startMic();
-    startTabCapture();
   }
 
-  // ── Mic (SpeechRecognition) ───────────────────────────────────────────
+  // ── Mic (SpeechRecognition — your own voice) ─────────────────────────
   let micRecognition = null;
   let micListening   = false;
 
@@ -348,7 +481,7 @@
     if (!tabListening) document.body.classList.remove('listening');
   }
 
-  // ── Tab audio (getDisplayMedia + SpeechRecognition) ───────────────────
+  // ── Interviewer audio (getUserMedia with selected device + SpeechRecognition) ──
   let tabStream      = null;
   let tabRecognition = null;
   let tabListening   = false;
@@ -362,52 +495,54 @@
 
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
-      setCardError('tab', 'Chrome required for tab capture.');
+      setCardError('tab', 'Chrome required for speech recognition.');
       return;
     }
 
-    // getDisplayMedia MUST be called from a user gesture.
-    // When called from handleStart() that gesture is satisfied.
+    // Get the selected audio device from the dropdown
+    const select = document.getElementById('audioDeviceSelect');
+    const selectedDeviceId = select.value;
+
+    if (!selectedDeviceId) {
+      setCardError('tab', 'Select an audio device first.');
+      return;
+    }
+
+    // Acquire the audio stream from the selected device
     let stream;
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,   // Chrome requires video:true to show tab picker
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
+          deviceId: { exact: selectedDeviceId },
           echoCancellation: false,
           noiseSuppression: false,
-          sampleRate: 44100,
-        },
-        selfBrowserSurface: 'exclude', // don't offer this tab
-        preferCurrentTab: false,
+          autoGainControl: false,
+        }
       });
     } catch (err) {
       if (err.name === 'NotAllowedError') {
-        setCardError('tab', 'Cancelled – tap 🖥️ to retry.');
+        setCardError('tab', 'Permission denied – allow mic access.');
+      } else if (err.name === 'NotFoundError') {
+        setCardError('tab', 'Device not found – refresh list & retry.');
       } else {
         setCardError('tab', 'Error: ' + err.message);
       }
       return;
     }
 
-    // Check the user actually shared audio (they must tick "Share tab audio")
-    const audioTracks = stream.getAudioTracks();
-    if (audioTracks.length === 0) {
-      // No audio track — stop the video track we don't need and bail
-      stream.getTracks().forEach(t => t.stop());
-      setCardError('tab', 'No audio – re-share & check "Share tab audio".');
-      return;
-    }
-
-    // Stop video track immediately — we only need audio
-    stream.getVideoTracks().forEach(t => t.stop());
     tabStream = stream;
 
-    // Feed the audio stream into a MediaStreamAudioSourceNode → AudioContext
-    // then pipe into a new MediaStream for SpeechRecognition
-    const ctx        = new AudioContext({ sampleRate: 16000 });
-    const source     = ctx.createMediaStreamSource(stream);
-    const dest       = ctx.createMediaStreamDestination();
-    source.connect(dest);
+    // IMPORTANT: Chrome's SpeechRecognition always uses the OS default
+    // recording device. To make it hear the VB-Cable, you must set
+    // CABLE Output as the DEFAULT RECORDING DEVICE in Windows Sound settings,
+    // OR use the per-app audio settings to route Chrome's mic input to VB-Cable.
+    //
+    // The getUserMedia call above ensures we hold the stream open so the
+    // device stays active. SpeechRecognition will then pick up audio from
+    // whatever the OS default recording device is.
+    //
+    // For best results: set VB-Cable as Chrome's mic input via
+    // Windows Settings → System → Sound → App volume and device preferences.
 
     tabRecognition = new SR();
     tabRecognition.continuous      = true;
@@ -415,43 +550,15 @@
     tabRecognition.maxAlternatives = 1;
     tabRecognition.lang            = 'en-US';
 
-    // Override the default mic by pointing recognition at the tab audio stream
-    // Note: This works in Chrome by reassigning the audio source via AudioContext
-    tabRecognition._stream = dest.stream; // stored for reference
-
-    // SpeechRecognition doesn't accept a stream directly — we use a workaround:
-    // inject the tab audio into a hidden <audio> element and use AudioContext
-    // to create a loopback. Chrome's SR picks up the default getUserMedia mic
-    // so we additionally suppress mic and use the tab audio track directly.
-    // Best supported method: use webkitSpeechRecognition with a MediaStream
-    // passed to an AudioWorklet-based pipeline, falling back to the simpler
-    // approach below which works in Chrome 94+.
-
-    // The most reliable Chrome approach: pass the stream to SR via
-    // the non-standard but widely-supported webkitSpeechRecognition MediaStream hack.
-    if (window.webkitSpeechRecognition) {
-      // Chrome exposes an undocumented `stream` option on the recognition object
-      // that lets you override the audio source.
-      Object.defineProperty(tabRecognition, 'grammars', { value: tabRecognition.grammars });
-      try {
-        // Try Chrome's internal stream override
-        tabRecognition._mediaStream = dest.stream;
-        const nativeSR = new window.webkitSpeechRecognition();
-        // Use audioContext route: create a script processor and expose stream
-        tabRecognition.stop();
-        tabRecognition = new window.webkitSpeechRecognition();
-        tabRecognition.continuous     = true;
-        tabRecognition.interimResults = true;
-        tabRecognition.lang           = 'en-US';
-      } catch (_) {}
-    }
-
     tabRecognition.onstart = () => {
       tabListening = true;
       setCardActive('tab', true);
       document.getElementById('tabIcon').classList.add('pulse');
       document.getElementById('tabIcon').textContent = '🔵';
-      document.getElementById('tabStatus').textContent = 'Listening to tab…';
+
+      // Show the device name in the status
+      const deviceName = select.options[select.selectedIndex]?.text || 'device';
+      document.getElementById('tabStatus').textContent = 'Listening via ' + deviceName;
       document.body.classList.add('listening');
     };
 
@@ -485,7 +592,7 @@
       }
     };
 
-    // Stop capture if user clicks "Stop sharing" in the browser bar
+    // If the stream track ends (e.g. device disconnected), stop capture
     stream.getAudioTracks()[0].onended = () => stopTabCapture();
 
     try { tabRecognition.start(); } catch (_) {}
@@ -547,8 +654,6 @@
 
   if (AUTOSTART) {
     // Hide and remove the overlay immediately — no tap needed.
-    // Electron (Edge) satisfies the gesture requirement at page-load time,
-    // so getDisplayMedia and getUserMedia can be called without a click.
     const overlay = document.getElementById('startOverlay');
     if (overlay) { overlay.classList.add('hidden'); setTimeout(() => overlay.remove(), 0); }
   }
@@ -564,16 +669,16 @@
     // WebSocket handshake completes.  We wrap rather than replace so the
     // original handler (setRelayDot) still runs.
     const _prevOnOpen = relaySocket.onopen;
-    relaySocket.onopen = (evt) => {
+    relaySocket.onopen = async (evt) => {
       if (_prevOnOpen) _prevOnOpen.call(relaySocket, evt);
+      await refreshDeviceList();
       startMic();
-      startTabCapture();
+      // Don't auto-start tab capture in AUTOSTART — user should pick the device first
     };
     // If the socket connected synchronously before we patched (shouldn't
     // happen, but be safe), fire immediately.
     if (relaySocket.readyState === WebSocket.OPEN) {
-      startMic();
-      startTabCapture();
+      refreshDeviceList().then(() => startMic());
     }
   }
 </script>
