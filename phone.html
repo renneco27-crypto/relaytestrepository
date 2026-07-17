@@ -549,9 +549,11 @@
   // Same SILENCE_MS timer used on the interviewer channel — flush only
   // after MIC_SILENCE_MS with no new final, joining all chunks first.
   //
-  // MIC_SILENCE_MS is slightly shorter than SILENCE_MS (1200 vs 1800) because
-  // your own answers tend to have tighter inter-clause pauses than interviewers.
-  const MIC_SILENCE_MS    = 1200;
+  // MIC_SILENCE_MS: wait a full 2 s of silence before flushing.
+  // Chrome fires isFinal on punctuation/clause boundaries mid-sentence —
+  // each one resets this timer, so the relay only gets the complete sentence
+  // after 2 s of genuine silence (i.e. you've actually stopped speaking).
+  const MIC_SILENCE_MS    = 2000;
   let micChunks           = [];   // accumulated final chunks this utterance
   let micSilenceTimer     = null; // setTimeout handle
 
