@@ -128,6 +128,7 @@ wss.on('connection', (ws, req) => {
         isFinal: msg.isFinal ?? false,
         // 'you' = candidate mic, 'interviewer' = tab audio capture
         speaker: msg.speaker ?? 'you',
+        phase:   msg.phase   ?? 'interim',
         from:    'phone',
         ts:      Date.now(),
       };

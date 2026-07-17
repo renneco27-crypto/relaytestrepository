@@ -161,6 +161,48 @@
   #hint .step { color: #6b7280; }
   #hint .highlight { color: #60a5fa; font-weight: 600; }
 
+  /* Language selector */
+  #langSelector {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 420px;
+    width: 100%;
+  }
+  #langSelector span {
+    font-size: 10px;
+    color: #4b5563;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    margin-right: 2px;
+  }
+  .lang-btn {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 20px;
+    border: 1.5px solid #1f2937;
+    background: #161b22;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lang-btn:active { opacity: 0.75; }
+  .lang-btn.selected {
+    border-color: #10b981;
+    background: #052e16;
+    color: #6ee7b7;
+  }
+  .lang-btn.lang-auto.selected {
+    border-color: #a78bfa;
+    background: #2e1065;
+    color: #c4b5fd;
+  }
+
   /* Mode badge */
   #modeBadge {
     font-size: 10px;
@@ -224,6 +266,15 @@
 
 <div id="modeBadge"></div>
 
+<!-- Language selector -->
+<div id="langSelector">
+  <span>Lang:</span>
+  <button class="lang-btn lang-auto selected" onclick="setLang('auto')" id="btn-auto">🌐 Auto</button>
+  <button class="lang-btn" onclick="setLang('en-US')"  id="btn-en-US">🇺🇸 English</button>
+  <button class="lang-btn" onclick="setLang('fil-PH')" id="btn-fil-PH">🇵🇭 Filipino</button>
+  <button class="lang-btn" onclick="setLang('ceb-PH')" id="btn-ceb-PH">🇵🇭 Bisaya</button>
+</div>
+
 <div id="relayStatus">
   <div id="relayDot"></div>
   <span id="relayLabel">Connecting to relay…</span>
@@ -267,6 +318,70 @@
   const params       = new URLSearchParams(location.search);
   const AUTOSTART    = params.get('autostart') === '1';
   const MODE         = params.get('mode') || 'both'; // 'mic', 'interviewer', or 'both'
+
+  // ── Language management ────────────────────────────────────────────────
+  // Web Speech API can only handle one language at a time.
+  // 'auto' mode cycles: fil-PH → en-US → ceb-PH so all three get recognised.
+  // Cebuano (ceb-PH) is not natively supported by Chrome; we fall back to
+  // fil-PH for that slot (which still catches many Bisaya words) and use
+  // maxAlternatives=3 so mixed-language utterances get the best candidate.
+
+  const AUTO_LANGS = ['fil-PH', 'en-US', 'fil-PH']; // cycle: Fil → EN → Fil (ceb fallback)
+  // Note: Chrome's fil-PH model handles Cebuano reasonably well since both
+  // share vocabulary. Pure ceb-PH isn't a recognised BCP-47 tag in Chrome.
+
+  let selectedLang   = 'auto'; // 'auto' | 'en-US' | 'fil-PH' | 'ceb-PH'
+  let autoLangIndex  = 0;
+  let autoLangTimer  = null;
+
+  function getEffectiveLang() {
+    if (selectedLang === 'auto')    return AUTO_LANGS[autoLangIndex];
+    if (selectedLang === 'ceb-PH') return 'fil-PH'; // best available proxy
+    return selectedLang;
+  }
+
+  function setLang(lang) {
+    selectedLang = lang;
+    // Update button styles
+    document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
+    const btnId = lang === 'auto'   ? 'btn-auto'
+                : lang === 'en-US'  ? 'btn-en-US'
+                : lang === 'fil-PH' ? 'btn-fil-PH'
+                :                     'btn-ceb-PH';
+    const btn = document.getElementById(btnId);
+    if (btn) btn.classList.add('selected');
+
+    if (lang === 'auto') {
+      startAutoLangCycle();
+    } else {
+      stopAutoLangCycle();
+    }
+
+    // Restart active recognitions with new lang
+    if (micListening)          { stopMic();          startMic(); }
+    if (interviewerListening)  { stopInterviewer();  startInterviewer(); }
+  }
+
+  function startAutoLangCycle() {
+    stopAutoLangCycle();
+    // Rotate language every 8 s so each gets periodic coverage
+    autoLangTimer = setInterval(() => {
+      autoLangIndex = (autoLangIndex + 1) % AUTO_LANGS.length;
+      // Bounce recognitions to pick up the new lang without interrupting flow
+      if (micListening) {
+        try { micRecognition && micRecognition.stop(); } catch (_) {}
+        // onend handler will restart it with the new lang
+      }
+      if (interviewerListening) {
+        try { interviewerRecognition && interviewerRecognition.stop(); } catch (_) {}
+      }
+    }, 8000);
+  }
+
+  function stopAutoLangCycle() {
+    clearInterval(autoLangTimer);
+    autoLangTimer = null;
+  }
 
   // ── Mode setup ─────────────────────────────────────────────────────────
   // Chrome SpeechRecognition ALWAYS uses one mic — whatever Chrome has set
@@ -390,9 +505,9 @@
     relaySocket.onerror = () => setRelayDot(false);
   }
 
-  function sendTranscript(text, isFinal, speaker) {
+  function sendTranscript(text, isFinal, speaker, phase) {
     if (relaySocket?.readyState === WebSocket.OPEN)
-      relaySocket.send(JSON.stringify({ type: 'transcript', text, isFinal, speaker }));
+      relaySocket.send(JSON.stringify({ type: 'transcript', text, isFinal, speaker, phase: phase ?? 'interim' }));
   }
 
   function setRelayDot(on) {
@@ -419,8 +534,9 @@
   }
 
   // ── Mic (SpeechRecognition — your own voice) ─────────────────────────
-  let micRecognition = null;
-  let micListening   = false;
+  let micRecognition     = null;
+  let micListening       = false;
+  let micPhase1Sent      = false; // resets after each final result
 
   function toggleMic() {
     if (MODE === 'interviewer') return; // disabled in interviewer mode
@@ -436,15 +552,15 @@
     micRecognition = new SR();
     micRecognition.continuous      = true;
     micRecognition.interimResults  = true;
-    micRecognition.maxAlternatives = 1;
-    micRecognition.lang            = 'en-US';
+    micRecognition.maxAlternatives = 3;
+    micRecognition.lang            = getEffectiveLang();
 
     micRecognition.onstart = () => {
       micListening = true;
       setCardActive('mic', true);
       document.getElementById('micIcon').classList.add('pulse');
       document.getElementById('micIcon').textContent = '🔴';
-      document.getElementById('micStatus').textContent = 'Listening…';
+      document.getElementById('micStatus').textContent = 'Listening… [' + getEffectiveLang() + ']';
       document.body.classList.add('listening');
     };
 
@@ -454,10 +570,21 @@
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
           showTranscript('you', t.trim(), true);
-          sendTranscript(t.trim(), true, 'you');
+          sendTranscript(t.trim(), true, 'you', 'final');
+          micPhase1Sent = false; // reset for next utterance
         } else {
           interim += t;
-          sendTranscript(t, false, 'you');
+          if (!micPhase1Sent) {
+            // Phase 1: send just the first word immediately
+            const firstWord = t.trim().split(/\s+/)[0];
+            if (firstWord) {
+              sendTranscript(firstWord, false, 'you', 1);
+              micPhase1Sent = true;
+            }
+          } else {
+            // Phase 2: send continuation interim updates as normal
+            sendTranscript(t, false, 'you', 2);
+          }
         }
       }
       if (interim) showTranscript('you', interim, false);
@@ -495,6 +622,7 @@
   // has its Chrome mic set to VB-Cable (via site settings / different profile).
   let interviewerRecognition = null;
   let interviewerListening   = false;
+  let interviewerPhase1Sent  = false; // resets after each final result
 
   function toggleTab() {
     if (MODE === 'mic') return; // disabled in mic mode
@@ -511,15 +639,15 @@
     interviewerRecognition = new SR();
     interviewerRecognition.continuous      = true;
     interviewerRecognition.interimResults  = true;
-    interviewerRecognition.maxAlternatives = 1;
-    interviewerRecognition.lang            = 'en-US';
+    interviewerRecognition.maxAlternatives = 3;
+    interviewerRecognition.lang            = getEffectiveLang();
 
     interviewerRecognition.onstart = () => {
       interviewerListening = true;
       setCardActive('tab', true);
       document.getElementById('tabIcon').classList.add('pulse');
       document.getElementById('tabIcon').textContent = '🔵';
-      document.getElementById('tabStatus').textContent = 'Listening via ' + (detectedMicLabel || 'Chrome mic');
+      document.getElementById('tabStatus').textContent = 'Listening via ' + (detectedMicLabel || 'Chrome mic') + ' [' + getEffectiveLang() + ']';
       document.body.classList.add('listening');
     };
 
@@ -529,10 +657,21 @@
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
           showTranscript('them', t.trim(), true);
-          sendTranscript(t.trim(), true, 'interviewer');
+          sendTranscript(t.trim(), true, 'interviewer', 'final');
+          interviewerPhase1Sent = false; // reset for next utterance
         } else {
           interim += t;
-          sendTranscript(t, false, 'interviewer');
+          if (!interviewerPhase1Sent) {
+            // Phase 1: send just the first word immediately
+            const firstWord = t.trim().split(/\s+/)[0];
+            if (firstWord) {
+              sendTranscript(firstWord, false, 'interviewer', 1);
+              interviewerPhase1Sent = true;
+            }
+          } else {
+            // Phase 2: send continuation interim updates as normal
+            sendTranscript(t, false, 'interviewer', 2);
+          }
         }
       }
       if (interim) showTranscript('them', interim, false);
@@ -612,6 +751,7 @@
 
   // ── Boot ──────────────────────────────────────────────────────────────
   setupMode();
+  startAutoLangCycle(); // default is 'auto'
 
   if (AUTOSTART) {
     const overlay = document.getElementById('startOverlay');
