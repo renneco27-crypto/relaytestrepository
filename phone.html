@@ -269,8 +269,8 @@
 <!-- Language selector -->
 <div id="langSelector">
   <span>Lang:</span>
-  <button class="lang-btn lang-auto selected" onclick="setLang('auto')" id="btn-auto">🌐 Auto</button>
-  <button class="lang-btn" onclick="setLang('en-US')"  id="btn-en-US">🇺🇸 English</button>
+  <button class="lang-btn lang-auto" onclick="setLang('auto')" id="btn-auto">🌐 Auto</button>
+  <button class="lang-btn selected" onclick="setLang('en-US')"  id="btn-en-US">🇺🇸 English</button>
   <button class="lang-btn" onclick="setLang('fil-PH')" id="btn-fil-PH">🇵🇭 Filipino</button>
   <button class="lang-btn" onclick="setLang('ceb-PH')" id="btn-ceb-PH">🇵🇭 Bisaya</button>
 </div>
@@ -330,7 +330,7 @@
   // Note: Chrome's fil-PH model handles Cebuano reasonably well since both
   // share vocabulary. Pure ceb-PH isn't a recognised BCP-47 tag in Chrome.
 
-  let selectedLang   = 'auto'; // 'auto' | 'en-US' | 'fil-PH' | 'ceb-PH'
+  let selectedLang   = 'en-US'; // 'auto' | 'en-US' | 'fil-PH' | 'ceb-PH'
   let autoLangIndex  = 0;
   let autoLangTimer  = null;
 
@@ -550,9 +550,10 @@
   // after MIC_SILENCE_MS with no new final, joining all chunks first.
   //
   // MIC_SILENCE_MS: wait a full 2 s of silence before flushing.
-  // Chrome fires isFinal on punctuation/clause boundaries mid-sentence —
-  // each one resets this timer, so the relay only gets the complete sentence
-  // after 2 s of genuine silence (i.e. you've actually stopped speaking).
+  // Chrome fires isFinal (sometimes with empty text) on period/clause boundaries
+  // mid-sentence. The timer resets on EVERY isFinal — empty or not — so those
+  // boundary events can't accidentally let an old countdown expire early.
+  // Relay only gets the complete sentence after 2 s of genuine silence.
   const MIC_SILENCE_MS    = 2000;
   let micChunks           = [];   // accumulated final chunks this utterance
   let micSilenceTimer     = null; // setTimeout handle
@@ -612,14 +613,12 @@
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
           // ── Accumulate instead of sending immediately ──────────────────
-          // Push chunk into buffer and restart the silence timer.
-          // micFlush() fires after MIC_SILENCE_MS of no new transcript,
-          // joining all chunks into one complete sentence before sending.
+          // ALWAYS reset the silence timer on any isFinal event — Chrome fires
+          // isFinal with empty text at period/sentence boundaries, and if we
+          // skip the reset those boundary events let the old timer expire early.
+          micResetTimer(); // restart 2000ms countdown on every isFinal (even empty)
           const chunk = t.trim();
-          if (chunk) {
-            micChunks.push(chunk);
-            micResetTimer(); // restart 1200ms countdown on every new final
-          }
+          if (chunk) micChunks.push(chunk);
           // Show accumulated text so far on phone UI (live feedback)
           const soFar = micChunks.join(' ').trim();
           if (soFar) showTranscript('you', soFar, false); // false = still building
@@ -690,7 +689,7 @@
   // Only applied to the interviewer channel. Your own mic (mic card) sends
   // finals immediately — you're not trying to AI-answer your own words.
 
-  const SILENCE_MS    = 1800;
+  const SILENCE_MS    = 2000;
   let ivrChunks       = [];   // accumulated final chunks this utterance
   let ivrSilenceTimer = null; // setTimeout handle
   let ivrPhase1Sent   = false; // tracks whether phase-1 word was sent
@@ -759,14 +758,12 @@
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
           // ── Accumulate instead of sending immediately ──────────────────
-          // Push this chunk into the buffer and restart the silence timer.
-          // ivrFlush() will fire after SILENCE_MS of no new transcript,
-          // joining all chunks into one complete sentence before sending.
+          // ALWAYS reset the silence timer on any isFinal event — Chrome fires
+          // isFinal with empty text at period/sentence boundaries, and if we
+          // skip the reset those boundary events let the old timer expire early.
+          ivrResetTimer(); // restart 2000ms countdown on every isFinal (even empty)
           const chunk = t.trim();
-          if (chunk) {
-            ivrChunks.push(chunk);
-            ivrResetTimer(); // restart 1800ms countdown on every new final
-          }
+          if (chunk) ivrChunks.push(chunk);
           // Show accumulated text so far on phone UI (live feedback)
           const soFar = ivrChunks.join(' ').trim();
           if (soFar) showTranscript('them', soFar, false); // false = still building
@@ -867,7 +864,7 @@
 
   // ── Boot ──────────────────────────────────────────────────────────────
   setupMode();
-  startAutoLangCycle(); // default is 'auto'
+  // default lang is en-US — only start the cycle if user switches to Auto
 
   if (AUTOSTART) {
     const overlay = document.getElementById('startOverlay');
