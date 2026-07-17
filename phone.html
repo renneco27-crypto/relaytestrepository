@@ -369,6 +369,8 @@
       autoLangIndex = (autoLangIndex + 1) % AUTO_LANGS.length;
       // Bounce recognitions to pick up the new lang without interrupting flow
       if (micListening) {
+        // Flush before bouncing so chunks from the old lang cycle aren't lost
+        micFlushImmediate();
         try { micRecognition && micRecognition.stop(); } catch (_) {}
         // onend handler will restart it with the new lang
       }
@@ -540,6 +542,42 @@
   let micListening       = false;
   let micPhase1Sent      = false; // resets after each final result
 
+  // ── Sentence accumulator for mic channel ─────────────────────────────
+  // Chrome fires isFinal on every silence gap, even mid-sentence.
+  // "If a computer is turning on but the monitor remains completely black…"
+  // can arrive as 2–3 separate isFinal events before the person finishes.
+  // Same SILENCE_MS timer used on the interviewer channel — flush only
+  // after MIC_SILENCE_MS with no new final, joining all chunks first.
+  //
+  // MIC_SILENCE_MS is slightly shorter than SILENCE_MS (1200 vs 1800) because
+  // your own answers tend to have tighter inter-clause pauses than interviewers.
+  const MIC_SILENCE_MS    = 1200;
+  let micChunks           = [];   // accumulated final chunks this utterance
+  let micSilenceTimer     = null; // setTimeout handle
+
+  function micResetTimer() {
+    clearTimeout(micSilenceTimer);
+    micSilenceTimer = setTimeout(micFlush, MIC_SILENCE_MS);
+  }
+
+  function micFlush() {
+    clearTimeout(micSilenceTimer);
+    micSilenceTimer = null;
+    if (micChunks.length === 0) return;
+    const full = micChunks.join(' ').replace(/\s+/g, ' ').trim();
+    micChunks     = [];
+    micPhase1Sent = false;
+    if (!full) return;
+    showTranscript('you', full, true);
+    sendTranscript(full, true, 'you', 'final');
+  }
+
+  function micFlushImmediate() {
+    clearTimeout(micSilenceTimer);
+    micSilenceTimer = null;
+    micFlush();
+  }
+
   function toggleMic() {
     if (MODE === 'interviewer') return; // disabled in interviewer mode
     if (micListening) stopMic(); else startMic();
@@ -571,9 +609,18 @@
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
-          showTranscript('you', t.trim(), true);
-          sendTranscript(t.trim(), true, 'you', 'final');
-          micPhase1Sent = false; // reset for next utterance
+          // ── Accumulate instead of sending immediately ──────────────────
+          // Push chunk into buffer and restart the silence timer.
+          // micFlush() fires after MIC_SILENCE_MS of no new transcript,
+          // joining all chunks into one complete sentence before sending.
+          const chunk = t.trim();
+          if (chunk) {
+            micChunks.push(chunk);
+            micResetTimer(); // restart 1200ms countdown on every new final
+          }
+          // Show accumulated text so far on phone UI (live feedback)
+          const soFar = micChunks.join(' ').trim();
+          if (soFar) showTranscript('you', soFar, false); // false = still building
         } else {
           interim += t;
           if (!micPhase1Sent) {
@@ -584,8 +631,9 @@
               micPhase1Sent = true;
             }
           } else {
-            // Phase 2: send continuation interim updates as normal
-            sendTranscript(t, false, 'you', 2);
+            // Phase 2: send combined "chunks so far + current interim"
+            const preview = [...micChunks, t].join(' ').trim();
+            sendTranscript(preview, false, 'you', 2);
           }
         }
       }
@@ -614,6 +662,8 @@
 
   function stopMic() {
     micListening = false;
+    // Flush any buffered chunks before stopping — don't lose partial sentences
+    micFlushImmediate();
     if (micRecognition) { try { micRecognition.stop(); } catch (_) {} micRecognition = null; }
     resetCard('mic');
     if (!interviewerListening) document.body.classList.remove('listening');
