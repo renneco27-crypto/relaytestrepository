@@ -373,6 +373,8 @@
         // onend handler will restart it with the new lang
       }
       if (interviewerListening) {
+        // Flush before bouncing so chunks from the old lang cycle aren't lost
+        ivrFlushImmediate();
         try { interviewerRecognition && interviewerRecognition.stop(); } catch (_) {}
       }
     }, 8000);
@@ -617,12 +619,60 @@
     if (!interviewerListening) document.body.classList.remove('listening');
   }
 
+  // ── Sentence accumulator for slow/pausing interviewers ───────────────
+  // Chrome finalises a result on every silence gap, even mid-sentence.
+  // A slow speaker: "Can you tell me… about your… experience with Docker?"
+  // arrives as 3 separate isFinal=true events — each fragment too short to
+  // trigger AI on the overlay, and the overlay only sees the last one.
+  //
+  // Fix: buffer consecutive finals here on the phone. Only flush (send one
+  // combined final to the overlay) after SILENCE_MS with no new transcript.
+  // Interim updates still go through immediately so the live display works.
+  //
+  // SILENCE_MS = 1800ms rationale:
+  //   ~800ms  = normal clause pause (speaker still going)
+  //   ~1200ms = "thinking" pause mid-sentence
+  //   ~1500ms = true sentence boundary for most speakers
+  //    1800ms = comfortable margin for slow/deliberate speech
+  //
+  // Only applied to the interviewer channel. Your own mic (mic card) sends
+  // finals immediately — you're not trying to AI-answer your own words.
+
+  const SILENCE_MS    = 1800;
+  let ivrChunks       = [];   // accumulated final chunks this utterance
+  let ivrSilenceTimer = null; // setTimeout handle
+  let ivrPhase1Sent   = false; // tracks whether phase-1 word was sent
+
+  function ivrResetTimer() {
+    clearTimeout(ivrSilenceTimer);
+    ivrSilenceTimer = setTimeout(ivrFlush, SILENCE_MS);
+  }
+
+  function ivrFlush() {
+    clearTimeout(ivrSilenceTimer);
+    ivrSilenceTimer = null;
+    if (ivrChunks.length === 0) return;
+    const full = ivrChunks.join(' ').replace(/\s+/g, ' ').trim();
+    ivrChunks     = [];
+    ivrPhase1Sent = false;
+    if (!full) return;
+    showTranscript('them', full, true);                    // mark as final on phone UI
+    sendTranscript(full, true, 'interviewer', 'final');    // one clean final to overlay
+  }
+
+  function ivrFlushImmediate() {
+    // Called when recognition stops — don't wait for the timer
+    clearTimeout(ivrSilenceTimer);
+    ivrSilenceTimer = null;
+    ivrFlush();
+  }
+
   // ── Interviewer (SpeechRecognition — VB-Cable audio) ──────────────────
   // This uses the SAME SpeechRecognition API. It works because this window
   // has its Chrome mic set to VB-Cable (via site settings / different profile).
   let interviewerRecognition = null;
   let interviewerListening   = false;
-  let interviewerPhase1Sent  = false; // resets after each final result
+  let interviewerPhase1Sent  = false; // kept for symmetry — unused (ivrPhase1Sent used instead)
 
   function toggleTab() {
     if (MODE === 'mic') return; // disabled in mic mode
@@ -656,21 +706,33 @@
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
-          showTranscript('them', t.trim(), true);
-          sendTranscript(t.trim(), true, 'interviewer', 'final');
-          interviewerPhase1Sent = false; // reset for next utterance
+          // ── Accumulate instead of sending immediately ──────────────────
+          // Push this chunk into the buffer and restart the silence timer.
+          // ivrFlush() will fire after SILENCE_MS of no new transcript,
+          // joining all chunks into one complete sentence before sending.
+          const chunk = t.trim();
+          if (chunk) {
+            ivrChunks.push(chunk);
+            ivrResetTimer(); // restart 1800ms countdown on every new final
+          }
+          // Show accumulated text so far on phone UI (live feedback)
+          const soFar = ivrChunks.join(' ').trim();
+          if (soFar) showTranscript('them', soFar, false); // false = still building
         } else {
+          // Interim: show live on phone, send phase-1/2 to overlay for early
+          // classification (classifyEarly runs on these — zero latency impact)
           interim += t;
-          if (!interviewerPhase1Sent) {
-            // Phase 1: send just the first word immediately
+          if (!ivrPhase1Sent) {
             const firstWord = t.trim().split(/\s+/)[0];
             if (firstWord) {
               sendTranscript(firstWord, false, 'interviewer', 1);
-              interviewerPhase1Sent = true;
+              ivrPhase1Sent = true;
             }
           } else {
-            // Phase 2: send continuation interim updates as normal
-            sendTranscript(t, false, 'interviewer', 2);
+            // Phase 2: send the combined "chunks so far + current interim"
+            // so the overlay's classifyEarly sees the full growing sentence
+            const preview = [...ivrChunks, t].join(' ').trim();
+            sendTranscript(preview, false, 'interviewer', 2);
           }
         }
       }
@@ -700,6 +762,8 @@
 
   function stopInterviewer() {
     interviewerListening = false;
+    // Flush any buffered chunks before stopping — don't lose partial sentences
+    ivrFlushImmediate();
     if (interviewerRecognition) { try { interviewerRecognition.stop(); } catch (_) {} interviewerRecognition = null; }
     resetCard('tab');
     if (!micListening) document.body.classList.remove('listening');
