@@ -313,36 +313,41 @@
 <div id="hint"></div>
 
 <script>
-  const RELAY_URL    = '{{RELAY_URL}}';
-  const RELAY_SECRET = '{{RELAY_SECRET}}';
-  const params       = new URLSearchParams(location.search);
-  const AUTOSTART    = params.get('autostart') === '1';
-  const MODE         = params.get('mode') || 'both'; // 'mic', 'interviewer', or 'both'
+  const RELAY_URL      = '{{RELAY_URL}}';
+  const RELAY_SECRET   = '{{RELAY_SECRET}}';
+  const DEEPGRAM_KEY   = '{{DEEPGRAM_KEY}}';   // ← paste your Deepgram API key here
+  const params         = new URLSearchParams(location.search);
+  const AUTOSTART      = params.get('autostart') === '1';
+  const MODE           = params.get('mode') || 'both'; // 'mic', 'interviewer', or 'both'
 
   // ── Language management ────────────────────────────────────────────────
-  // Web Speech API can only handle one language at a time.
-  // 'auto' mode cycles: fil-PH → en-US → ceb-PH so all three get recognised.
-  // Cebuano (ceb-PH) is not natively supported by Chrome; we fall back to
-  // fil-PH for that slot (which still catches many Bisaya words) and use
-  // maxAlternatives=3 so mixed-language utterances get the best candidate.
+  // Deepgram supports multilingual models natively.
+  // 'auto' uses Deepgram's multi-language detection (no cycling needed).
+  // fil-PH and en-US map to Deepgram language codes.
+  // ceb-PH falls back to fil-PH (closest supported model).
 
-  const AUTO_LANGS = ['fil-PH', 'en-US', 'fil-PH']; // cycle: Fil → EN → Fil (ceb fallback)
-  // Note: Chrome's fil-PH model handles Cebuano reasonably well since both
-  // share vocabulary. Pure ceb-PH isn't a recognised BCP-47 tag in Chrome.
+  const DG_LANG_MAP = {
+    'en-US':  'en-US',
+    'fil-PH': 'fil',
+    'ceb-PH': 'fil',   // Deepgram has no ceb model; fil is closest
+    'auto':   'multi', // Deepgram's multilingual detection
+  };
 
-  let selectedLang   = 'en-US'; // 'auto' | 'en-US' | 'fil-PH' | 'ceb-PH'
-  let autoLangIndex  = 0;
-  let autoLangTimer  = null;
+  let selectedLang  = 'en-US'; // 'auto' | 'en-US' | 'fil-PH' | 'ceb-PH'
 
+  function getDGLang() {
+    return DG_LANG_MAP[selectedLang] || 'en-US';
+  }
+
+  // Web Speech API uses standard BCP-47 tags (different from Deepgram codes)
   function getEffectiveLang() {
-    if (selectedLang === 'auto')    return AUTO_LANGS[autoLangIndex];
-    if (selectedLang === 'ceb-PH') return 'fil-PH'; // best available proxy
+    if (selectedLang === 'auto')   return 'fil-PH'; // best single default for auto
+    if (selectedLang === 'ceb-PH') return 'fil-PH'; // Chrome doesn't support ceb-PH
     return selectedLang;
   }
 
   function setLang(lang) {
     selectedLang = lang;
-    // Update button styles
     document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('selected'));
     const btnId = lang === 'auto'   ? 'btn-auto'
                 : lang === 'en-US'  ? 'btn-en-US'
@@ -351,46 +356,37 @@
     const btn = document.getElementById(btnId);
     if (btn) btn.classList.add('selected');
 
-    if (lang === 'auto') {
-      startAutoLangCycle();
-    } else {
-      stopAutoLangCycle();
-    }
-
     // Restart active recognitions with new lang
     if (micListening)          { stopMic();          startMic(); }
     if (interviewerListening)  { stopInterviewer();  startInterviewer(); }
   }
 
-  function startAutoLangCycle() {
-    stopAutoLangCycle();
-    // Rotate language every 8 s so each gets periodic coverage
-    autoLangTimer = setInterval(() => {
-      autoLangIndex = (autoLangIndex + 1) % AUTO_LANGS.length;
-      // Bounce recognitions to pick up the new lang without interrupting flow
-      if (micListening) {
-        // Flush before bouncing so chunks from the old lang cycle aren't lost
-        micFlushImmediate();
-        try { micRecognition && micRecognition.stop(); } catch (_) {}
-        // onend handler will restart it with the new lang
-      }
-      if (interviewerListening) {
-        // Flush before bouncing so chunks from the old lang cycle aren't lost
-        ivrFlushImmediate();
-        try { interviewerRecognition && interviewerRecognition.stop(); } catch (_) {}
-      }
-    }, 8000);
-  }
+  // ── Deepgram keyword boosting ─────────────────────────────────────────
+  // Replaces the old regex VOCAB_CORRECTIONS table.
+  // Deepgram boosts recognition probability for these terms at the model
+  // level — no post-processing needed. Format: "word:boost" (boost 1–10).
+  // https://developers.deepgram.com/docs/keywords
 
-  function stopAutoLangCycle() {
-    clearInterval(autoLangTimer);
-    autoLangTimer = null;
-  }
+  const DG_KEYWORDS = [
+    // Hiring & offer
+    'hiring:2', 'onboarding:2', 'offboarding:2', 'requisition:2',
+    'headcount:2', 'leveling:2', 'rubric:2', 'scorecard:2', 'debrief:2',
+    // Compensation
+    'RSUs:3', 'vesting:2', 'OTE:3', 'HRBP:3', 'PTO:3', 'PIP:3',
+    'KPIs:3', 'OKRs:3', '401k:2',
+    // Job titles
+    'CTO:3', 'CEO:3', 'CFO:3', 'COO:3', 'VP:2',
+    // Work arrangement
+    'async:2', 'WFH:2', 'hybrid:2',
+    // Tech interview
+    'Docker:3', 'Kubernetes:3', 'microservices:2', 'GraphQL:3',
+    'TypeScript:3', 'PostgreSQL:3', 'Redis:3', 'CI/CD:3',
+  ];
 
   // ── Mode setup ─────────────────────────────────────────────────────────
-  // Chrome SpeechRecognition ALWAYS uses one mic — whatever Chrome has set
-  // for this site. You CANNOT have two SpeechRecognition instances on the
-  // same page using different audio devices.
+  // Chrome's getUserMedia ALWAYS uses one mic per window — whatever Chrome
+  // has set for this site. You CANNOT capture two different audio devices
+  // on the same page.
   //
   // Solution: open the page in TWO windows with different Chrome profiles
   // (or one normal + one incognito). Each window sets a different mic in
@@ -399,7 +395,8 @@
   //   Window 1: /?mode=mic           → Chrome mic = physical mic
   //   Window 2: /?mode=interviewer   → Chrome mic = CABLE Output (VB-Cable)
   //
-  // Both connect to the same relay. Transcripts are labelled correctly.
+  // Both connect to the same relay (WebSocket). Audio is streamed to
+  // Deepgram's API for transcription. Transcripts are labelled correctly.
 
   function setupMode() {
     const badge = document.getElementById('modeBadge');
@@ -509,6 +506,182 @@
     relaySocket.onerror = () => setRelayDot(false);
   }
 
+  // ── Deepgram WebSocket factory ────────────────────────────────────────
+  // Opens a Deepgram streaming session for a given MediaStream.
+  // Returns { dgSocket, mediaRecorder, stop() }.
+  //
+  // Deepgram params used:
+  //   model=nova-3          — best accuracy, lowest latency
+  //   language              — mapped from selectedLang via getDGLang()
+  //   smart_format=true     — auto-punctuation, number formatting
+  //   interim_results=true  — partial transcripts for live UI
+  //   utterance_end_ms=1000 — fires UtteranceEnd after 1 s of silence
+  //   vad_events=true       — voice activity detection events
+  //   keywords              — boost list (replaces regex corrections)
+  //   endpointing=300       — treat 300 ms of silence as end of utterance
+
+  function buildDGUrl() {
+    const kw = DG_KEYWORDS.map(k => 'keywords=' + encodeURIComponent(k)).join('&');
+    return (
+      'wss://api.deepgram.com/v1/listen' +
+      '?model=nova-3' +
+      '&language=' + getDGLang() +
+      '&smart_format=true' +
+      '&interim_results=true' +
+      '&utterance_end_ms=1000' +
+      '&vad_events=true' +
+      '&endpointing=300' +
+      '&encoding=webm-opus' +
+      '&' + kw
+    );
+  }
+
+  function openDGSession(stream, { onInterim, onFinal, onError, onClose, onFallback, labelEl }) {
+    const dgSocket = new WebSocket(buildDGUrl(), ['token', DEEPGRAM_KEY]);
+    let mediaRecorder = null;
+    let fallbackTriggered = false;
+
+    function triggerFallback() {
+      if (fallbackTriggered) return;
+      fallbackTriggered = true;
+      mediaRecorder?.stop();
+      stream.getTracks().forEach(t => t.stop());
+      if (dgSocket.readyState === WebSocket.OPEN)
+        dgSocket.send(JSON.stringify({ type: 'CloseStream' }));
+      setTimeout(() => {
+        if (dgSocket.readyState !== WebSocket.CLOSED) dgSocket.close();
+      }, 500);
+      if (onFallback) onFallback();
+    }
+
+    dgSocket.onopen = () => {
+      mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0 && dgSocket.readyState === WebSocket.OPEN)
+          dgSocket.send(e.data);
+      };
+      mediaRecorder.start(250);
+    };
+
+    dgSocket.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch { return; }
+
+      if (msg.type === 'Results') {
+        const alt = msg.channel?.alternatives?.[0];
+        if (!alt) return;
+        const text = alt.transcript?.trim();
+        if (!text) return;
+        if (msg.is_final) {
+          onFinal(text, msg.speech_final);
+        } else {
+          onInterim(text);
+        }
+      } else if (msg.type === 'UtteranceEnd') {
+        onFinal('', true);
+      } else if (msg.type === 'error') {
+        if (msg.code === 402 || (msg.description && /quota|credit|exhausted|billing/i.test(msg.description)))
+          triggerFallback();
+        else if (onError)
+          onError(new Error(msg.description || 'Deepgram error'));
+      }
+    };
+
+    dgSocket.onerror = (e) => { if (onError && !fallbackTriggered) onError(e); };
+    dgSocket.onclose = (e) => {
+      if (e.code === 4001 || (e.reason && /quota|credit|exhausted|billing|unauthorized/i.test(e.reason)))
+        triggerFallback();
+      else if (onClose)
+        onClose();
+    };
+
+    function stop() {
+      fallbackTriggered = true;
+      mediaRecorder?.stop();
+      stream.getTracks().forEach(t => t.stop());
+      if (dgSocket.readyState === WebSocket.OPEN) {
+        dgSocket.send(JSON.stringify({ type: 'CloseStream' }));
+      }
+      setTimeout(() => {
+        if (dgSocket.readyState !== WebSocket.CLOSED) dgSocket.close();
+      }, 500);
+    }
+
+    return { dgSocket, mediaRecorder, stop };
+  }
+
+  // ── Vocabulary correction map ─────────────────────────────────────────
+  // Used when falling back to Web Speech API (Deepgram quota exhausted).
+  // Deepgram handles these natively via keyword boosting — this table is
+  // only active during fallback mode.
+
+  const VOCAB_CORRECTIONS = [
+    // Hiring & offer
+    [/\bhypen year\b/gi,                      'hiring in a year'],
+    [/\bhigh pen year\b/gi,                   'hiring in a year'],
+    [/\bconsider hypen\b/gi,                  'consider hiring'],
+    [/\bconsider high pen\b/gi,               'consider hiring'],
+    [/\bhyp in\b/gi,                          'hiring'],
+    [/\bhigher ring\b/gi,                     'hiring'],
+    [/\bhi ring\b/gi,                         'hiring'],
+    [/\bfull time roll\b/gi,                  'full-time role'],
+    [/\bfull time role\b/gi,                  'full-time role'],
+    [/\bpart time roll\b/gi,                  'part-time role'],
+    [/\bon boarding\b/gi,                     'onboarding'],
+    [/\breq[u]?isit[io]?n\b/gi,              'requisition'],
+    [/\bhead count\b/gi,                      'headcount'],
+    [/\blevel[l]?ing guide\b/gi,             'leveling guide'],
+    [/\brubric\b/gi,                          'rubric'],
+    [/\bscorecard\b/gi,                       'scorecard'],
+    [/\bdebrief\b/gi,                         'debrief'],
+    // Compensation
+    [/\bbase celery\b/gi,                     'base salary'],
+    [/\bbase sell a ree\b/gi,                 'base salary'],
+    [/\bRSU[s]?\b/g,                          'RSUs'],
+    [/\bvesting\b/gi,                         'vesting'],
+    [/\bOTE\b/g,                              'OTE'],
+    [/\bon target earnings\b/gi,              'on-target earnings'],
+    [/\bHRBP\b/gi,                            'HRBP'],
+    [/\bH R B P\b/gi,                         'HRBP'],
+    [/\bPTO\b/g,                              'PTO'],
+    [/\bp t o\b/gi,                           'PTO'],
+    [/\bPIP\b/g,                              'PIP'],
+    [/\bP I P\b/gi,                           'PIP'],
+    [/\b401[kK]\b/g,                          '401(k)'],
+    [/\b4 0 1 k\b/gi,                         '401(k)'],
+    [/\bKPIs\b/gi,                            'KPIs'],
+    [/\bK P I[s]?\b/gi,                       'KPIs'],
+    [/\bOKRs\b/gi,                            'OKRs'],
+    [/\bO K R[s]?\b/gi,                       'OKRs'],
+    // Titles
+    [/\bCTO\b/g,                              'CTO'],
+    [/\bCEO\b/g,                              'CEO'],
+    [/\bCFO\b/g,                              'CFO'],
+    [/\bCOO\b/g,                              'COO'],
+    [/\bVP\b/g,                               'VP'],
+    // Work arrangement
+    [/\basync\b/gi,                           'async'],
+    [/\bWFH\b/g,                              'WFH'],
+    [/\bhybrid roll\b/gi,                     'hybrid role'],
+    // Tech
+    [/\bDocker\b/gi,                          'Docker'],
+    [/\bKubernetes\b/gi,                      'Kubernetes'],
+    [/\bGraphQL\b/gi,                         'GraphQL'],
+    [/\bTypeScript\b/gi,                      'TypeScript'],
+    [/\bPostgreSQL\b/gi,                      'PostgreSQL'],
+    [/\bRedis\b/gi,                           'Redis'],
+    [/\bCI\/CD\b/gi,                          'CI/CD'],
+    [/\bmicroservices\b/gi,                   'microservices'],
+  ];
+
+  function fixTranscript(text) {
+    let out = text;
+    for (const [pattern, replacement] of VOCAB_CORRECTIONS) {
+      out = out.replace(pattern, replacement);
+    }
+    return out;
+  }
+
   function sendTranscript(text, isFinal, speaker, phase) {
     if (relaySocket?.readyState === WebSocket.OPEN)
       relaySocket.send(JSON.stringify({ type: 'transcript', text, isFinal, speaker, phase: phase ?? 'interim' }));
@@ -537,26 +710,20 @@
     if (MODE === 'interviewer') startInterviewer();
   }
 
-  // ── Mic (SpeechRecognition — your own voice) ─────────────────────────
-  let micRecognition     = null;
-  let micListening       = false;
-  let micPhase1Sent      = false; // resets after each final result
+  // ── Mic channel (Deepgram — your own voice) ──────────────────────────
+  let micSession     = null;   // { dgSocket, mediaRecorder, stop }
+  let micListening   = false;
+  let micPhase1Sent  = false;
 
   // ── Sentence accumulator for mic channel ─────────────────────────────
-  // Chrome fires isFinal on every silence gap, even mid-sentence.
-  // "If a computer is turning on but the monitor remains completely black…"
-  // can arrive as 2–3 separate isFinal events before the person finishes.
-  // Same SILENCE_MS timer used on the interviewer channel — flush only
-  // after MIC_SILENCE_MS with no new final, joining all chunks first.
-  //
-  // MIC_SILENCE_MS: wait a full 2 s of silence before flushing.
-  // Chrome fires isFinal (sometimes with empty text) on period/clause boundaries
-  // mid-sentence. The timer resets on EVERY isFinal — empty or not — so those
-  // boundary events can't accidentally let an old countdown expire early.
-  // Relay only gets the complete sentence after 2 s of genuine silence.
-  const MIC_SILENCE_MS    = 2000;
-  let micChunks           = [];   // accumulated final chunks this utterance
-  let micSilenceTimer     = null; // setTimeout handle
+  // Deepgram fires is_final on utterance boundaries (endpointing=300ms).
+  // speech_final=true + UtteranceEnd = true sentence boundary.
+  // We still accumulate is_final chunks and flush on speech_final/UtteranceEnd
+  // so slow speakers get one clean combined sentence to the relay.
+
+  const MIC_SILENCE_MS = 2000;
+  let micChunks        = [];
+  let micSilenceTimer  = null;
 
   function micResetTimer() {
     clearTimeout(micSilenceTimer);
@@ -567,7 +734,8 @@
     clearTimeout(micSilenceTimer);
     micSilenceTimer = null;
     if (micChunks.length === 0) return;
-    const full = micChunks.join(' ').replace(/\s+/g, ' ').trim();
+    const raw  = micChunks.join(' ').replace(/\s+/g, ' ').trim();
+    const full = fixTranscript(raw);
     micChunks     = [];
     micPhase1Sent = false;
     if (!full) return;
@@ -582,112 +750,77 @@
   }
 
   function toggleMic() {
-    if (MODE === 'interviewer') return; // disabled in interviewer mode
+    if (MODE === 'interviewer') return;
     if (micListening) stopMic(); else startMic();
   }
 
-  function startMic() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setCardError('mic', 'Use Chrome for mic support.');
+  async function startMic() {
+    micUsingFallback = false;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setCardError('mic', 'Mic blocked – check permissions.');
       return;
     }
-    micRecognition = new SR();
-    micRecognition.continuous      = true;
-    micRecognition.interimResults  = true;
-    micRecognition.maxAlternatives = 3;
-    micRecognition.lang            = getEffectiveLang();
 
-    micRecognition.onstart = () => {
-      micListening = true;
-      setCardActive('mic', true);
-      document.getElementById('micIcon').classList.add('pulse');
-      document.getElementById('micIcon').textContent = '🔴';
-      document.getElementById('micStatus').textContent = 'Listening… [' + getEffectiveLang() + ']';
-      document.body.classList.add('listening');
-    };
+    micListening = true;
+    setCardActive('mic', true);
+    document.getElementById('micIcon').classList.add('pulse');
+    document.getElementById('micIcon').textContent = '🔴';
+    document.getElementById('micStatus').textContent = 'Connecting to Deepgram…';
+    document.body.classList.add('listening');
 
-    micRecognition.onresult = (e) => {
-      let interim = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) {
-          // ── Accumulate instead of sending immediately ──────────────────
-          // ALWAYS reset the silence timer on any isFinal event — Chrome fires
-          // isFinal with empty text at period/sentence boundaries, and if we
-          // skip the reset those boundary events let the old timer expire early.
-          micResetTimer(); // restart 2000ms countdown on every isFinal (even empty)
-          const chunk = t.trim();
-          if (chunk) micChunks.push(chunk);
-          // Show accumulated text so far on phone UI (live feedback)
-          const soFar = micChunks.join(' ').trim();
-          if (soFar) showTranscript('you', soFar, false); // false = still building
+    micSession = openDGSession(stream, {
+      onInterim(text) {
+        showTranscript('you', text, false);
+        if (!micPhase1Sent) {
+          const firstWord = text.trim().split(/\s+/)[0];
+          if (firstWord) { sendTranscript(firstWord, false, 'you', 1); micPhase1Sent = true; }
         } else {
-          interim += t;
-          if (!micPhase1Sent) {
-            // Phase 1: send just the first word immediately
-            const firstWord = t.trim().split(/\s+/)[0];
-            if (firstWord) {
-              sendTranscript(firstWord, false, 'you', 1);
-              micPhase1Sent = true;
-            }
-          } else {
-            // Phase 2: send combined "chunks so far + current interim"
-            const preview = [...micChunks, t].join(' ').trim();
-            sendTranscript(preview, false, 'you', 2);
-          }
+          const preview = [...micChunks, text].join(' ').trim();
+          sendTranscript(preview, false, 'you', 2);
         }
-      }
-      if (interim) showTranscript('you', interim, false);
-    };
-
-    micRecognition.onerror = (e) => {
-      if (e.error === 'not-allowed') {
-        setCardError('mic', 'Mic blocked – check permissions.');
-        stopMic();
-      } else if (e.error !== 'no-speech') {
-        document.getElementById('micStatus').textContent = 'Error: ' + e.error;
-      }
-    };
-
-    micRecognition.onend = () => {
-      if (micListening) {
-        try { micRecognition.start(); } catch (_) {}
-      } else {
-        resetCard('mic');
-      }
-    };
-
-    try { micRecognition.start(); } catch (_) {}
+      },
+      onFinal(text, speechFinal) {
+        micResetTimer();
+        if (text) micChunks.push(text);
+        const soFar = micChunks.join(' ').trim();
+        if (soFar) showTranscript('you', soFar, false);
+        if (speechFinal) micFlush();
+        document.getElementById('micStatus').textContent = 'Listening… [' + getDGLang() + ']';
+      },
+      onError() { setCardError('mic', 'Deepgram error – check your API key.'); stopMic(); },
+      onClose()  { if (micListening && !micUsingFallback) { startMic(); } else if (!micListening) { resetCard('mic'); } },
+      onFallback() {
+        document.getElementById('micStatus').textContent = 'Deepgram unavailable – falling back to Web Speech…';
+        startMicFallback();
+      },
+    });
   }
 
   function stopMic() {
     micListening = false;
-    // Flush any buffered chunks before stopping — don't lose partial sentences
+    micUsingFallback = false;
     micFlushImmediate();
+    micSession?.stop(); micSession = null;
     if (micRecognition) { try { micRecognition.stop(); } catch (_) {} micRecognition = null; }
     resetCard('mic');
     if (!interviewerListening) document.body.classList.remove('listening');
   }
 
   // ── Sentence accumulator for slow/pausing interviewers ───────────────
-  // Chrome finalises a result on every silence gap, even mid-sentence.
+  // Deepgram fires is_final on utterance boundaries (endpointing=300ms).
   // A slow speaker: "Can you tell me… about your… experience with Docker?"
-  // arrives as 3 separate isFinal=true events — each fragment too short to
-  // trigger AI on the overlay, and the overlay only sees the last one.
+  // arrives as 3 separate is_final events — each fragment too short to
+  // trigger AI on the overlay.
   //
   // Fix: buffer consecutive finals here on the phone. Only flush (send one
   // combined final to the overlay) after SILENCE_MS with no new transcript.
   // Interim updates still go through immediately so the live display works.
   //
-  // SILENCE_MS = 1800ms rationale:
-  //   ~800ms  = normal clause pause (speaker still going)
-  //   ~1200ms = "thinking" pause mid-sentence
-  //   ~1500ms = true sentence boundary for most speakers
-  //    1800ms = comfortable margin for slow/deliberate speech
-  //
-  // Only applied to the interviewer channel. Your own mic (mic card) sends
-  // finals immediately — you're not trying to AI-answer your own words.
+  // SILENCE_MS = 2000ms gives comfortable margin for slow/deliberate speech.
+  // speech_final + UtteranceEnd trigger an immediate flush.
 
   const SILENCE_MS    = 2000;
   let ivrChunks       = [];   // accumulated final chunks this utterance
@@ -703,7 +836,8 @@
     clearTimeout(ivrSilenceTimer);
     ivrSilenceTimer = null;
     if (ivrChunks.length === 0) return;
-    const full = ivrChunks.join(' ').replace(/\s+/g, ' ').trim();
+    const raw  = ivrChunks.join(' ').replace(/\s+/g, ' ').trim();
+    const full = fixTranscript(raw);  // ← vocabulary correction pass
     ivrChunks     = [];
     ivrPhase1Sent = false;
     if (!full) return;
@@ -718,37 +852,151 @@
     ivrFlush();
   }
 
-  // ── Interviewer (SpeechRecognition — VB-Cable audio) ──────────────────
-  // This uses the SAME SpeechRecognition API. It works because this window
-  // has its Chrome mic set to VB-Cable (via site settings / different profile).
-  let interviewerRecognition = null;
-  let interviewerListening   = false;
-  let interviewerPhase1Sent  = false; // kept for symmetry — unused (ivrPhase1Sent used instead)
+  // ── Interviewer channel (Deepgram — VB-Cable audio) ──────────────────
+  // Uses Deepgram streaming via MediaRecorder (same pattern as mic channel).
+  let interviewerSession   = null;   // { dgSocket, mediaRecorder, stop }
+  let interviewerListening = false;
 
   function toggleTab() {
     if (MODE === 'mic') return; // disabled in mic mode
     if (interviewerListening) stopInterviewer(); else startInterviewer();
   }
 
-  function startInterviewer() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setCardError('tab', 'Chrome required for speech recognition.');
+  async function startInterviewer() {
+    ivrUsingFallback = false;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setCardError('tab', 'Mic blocked – check permissions.');
       return;
     }
 
+    interviewerListening = true;
+    setCardActive('tab', true);
+    document.getElementById('tabIcon').classList.add('pulse');
+    document.getElementById('tabIcon').textContent = '🔵';
+    document.getElementById('tabStatus').textContent = 'Connecting to Deepgram… [' + getDGLang() + ']';
+    document.body.classList.add('listening');
+
+    interviewerSession = openDGSession(stream, {
+      onInterim(text) {
+        showTranscript('them', text, false);
+        if (!ivrPhase1Sent) {
+          const firstWord = text.trim().split(/\s+/)[0];
+          if (firstWord) { sendTranscript(firstWord, false, 'interviewer', 1); ivrPhase1Sent = true; }
+        } else {
+          const preview = [...ivrChunks, text].join(' ').trim();
+          sendTranscript(preview, false, 'interviewer', 2);
+        }
+      },
+      onFinal(text, speechFinal) {
+        ivrResetTimer();
+        if (text) ivrChunks.push(text);
+        const soFar = ivrChunks.join(' ').trim();
+        if (soFar) showTranscript('them', soFar, false);
+        if (speechFinal) ivrFlush();
+        document.getElementById('tabStatus').textContent = 'Listening… [' + getDGLang() + ']';
+      },
+      onError() { setCardError('tab', 'Deepgram error – check your API key.'); stopInterviewer(); },
+      onClose()  { if (interviewerListening && !ivrUsingFallback) { startInterviewer(); } else if (!interviewerListening) { resetCard('tab'); } },
+      onFallback() {
+        document.getElementById('tabStatus').textContent = 'Deepgram unavailable – falling back to Web Speech…';
+        startInterviewerFallback();
+      },
+    });
+  }
+
+  function stopInterviewer() {
+    interviewerListening = false;
+    ivrUsingFallback = false;
+    ivrFlushImmediate();
+    interviewerSession?.stop(); interviewerSession = null;
+    if (interviewerRecognition) { try { interviewerRecognition.stop(); } catch (_) {} interviewerRecognition = null; }
+    resetCard('tab');
+    if (!micListening) document.body.classList.remove('listening');
+  }
+
+  // ── Web Speech fallback (when Deepgram quota is exhausted) ────────────
+  let micRecognition         = null;
+  let interviewerRecognition = null;
+  let micUsingFallback       = false;  // true when mic channel is on Web Speech
+  let ivrUsingFallback       = false;  // true when interviewer channel is on Web Speech
+
+  function startMicFallback() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setCardError('mic', 'Chrome required for speech recognition.'); return; }
+
+    micUsingFallback = true;
+    micRecognition = new SR();
+    micRecognition.continuous = true;
+    micRecognition.interimResults = true;
+    micRecognition.maxAlternatives = 3;
+    micRecognition.lang = getEffectiveLang();
+
+    micRecognition.onstart = () => {
+      micListening = true;
+      setCardActive('mic', true);
+      document.getElementById('micIcon').classList.add('pulse');
+      document.getElementById('micIcon').textContent = '🔴';
+      document.getElementById('micStatus').textContent = '⚠️ Fallback (Web Speech) [' + getEffectiveLang() + ']';
+      document.body.classList.add('listening');
+    };
+
+    micRecognition.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          micResetTimer();
+          const chunk = t.trim();
+          if (chunk) micChunks.push(chunk);
+          const soFar = micChunks.join(' ').trim();
+          if (soFar) showTranscript('you', soFar, false);
+        } else {
+          interim += t;
+          if (!micPhase1Sent) {
+            const firstWord = t.trim().split(/\s+/)[0];
+            if (firstWord) { sendTranscript(firstWord, false, 'you', 1); micPhase1Sent = true; }
+          } else {
+            const preview = [...micChunks, t].join(' ').trim();
+            sendTranscript(preview, false, 'you', 2);
+          }
+        }
+      }
+      if (interim) showTranscript('you', interim, false);
+    };
+
+    micRecognition.onerror = (e) => {
+      if (e.error === 'not-allowed') { setCardError('mic', 'Mic blocked – check permissions.'); stopMic(); }
+      else if (e.error !== 'no-speech') document.getElementById('micStatus').textContent = 'SR error: ' + e.error;
+    };
+
+    micRecognition.onend = () => {
+      if (micListening) { try { micRecognition.start(); } catch (_) {} }
+      else { resetCard('mic'); }
+    };
+
+    try { micRecognition.start(); } catch (_) {}
+  }
+
+  function startInterviewerFallback() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setCardError('tab', 'Chrome required for speech recognition.'); return; }
+
+    ivrUsingFallback = true;
     interviewerRecognition = new SR();
-    interviewerRecognition.continuous      = true;
-    interviewerRecognition.interimResults  = true;
+    interviewerRecognition.continuous = true;
+    interviewerRecognition.interimResults = true;
     interviewerRecognition.maxAlternatives = 3;
-    interviewerRecognition.lang            = getEffectiveLang();
+    interviewerRecognition.lang = getEffectiveLang();
 
     interviewerRecognition.onstart = () => {
       interviewerListening = true;
       setCardActive('tab', true);
       document.getElementById('tabIcon').classList.add('pulse');
       document.getElementById('tabIcon').textContent = '🔵';
-      document.getElementById('tabStatus').textContent = 'Listening via ' + (detectedMicLabel || 'Chrome mic') + ' [' + getEffectiveLang() + ']';
+      document.getElementById('tabStatus').textContent = '⚠️ Fallback (Web Speech) [' + getEffectiveLang() + ']';
       document.body.classList.add('listening');
     };
 
@@ -757,29 +1005,17 @@
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
         if (e.results[i].isFinal) {
-          // ── Accumulate instead of sending immediately ──────────────────
-          // ALWAYS reset the silence timer on any isFinal event — Chrome fires
-          // isFinal with empty text at period/sentence boundaries, and if we
-          // skip the reset those boundary events let the old timer expire early.
-          ivrResetTimer(); // restart 2000ms countdown on every isFinal (even empty)
+          ivrResetTimer();
           const chunk = t.trim();
           if (chunk) ivrChunks.push(chunk);
-          // Show accumulated text so far on phone UI (live feedback)
           const soFar = ivrChunks.join(' ').trim();
-          if (soFar) showTranscript('them', soFar, false); // false = still building
+          if (soFar) showTranscript('them', soFar, false);
         } else {
-          // Interim: show live on phone, send phase-1/2 to overlay for early
-          // classification (classifyEarly runs on these — zero latency impact)
           interim += t;
           if (!ivrPhase1Sent) {
             const firstWord = t.trim().split(/\s+/)[0];
-            if (firstWord) {
-              sendTranscript(firstWord, false, 'interviewer', 1);
-              ivrPhase1Sent = true;
-            }
+            if (firstWord) { sendTranscript(firstWord, false, 'interviewer', 1); ivrPhase1Sent = true; }
           } else {
-            // Phase 2: send the combined "chunks so far + current interim"
-            // so the overlay's classifyEarly sees the full growing sentence
             const preview = [...ivrChunks, t].join(' ').trim();
             sendTranscript(preview, false, 'interviewer', 2);
           }
@@ -789,33 +1025,16 @@
     };
 
     interviewerRecognition.onerror = (e) => {
-      if (e.error === 'not-allowed') {
-        setCardError('tab', 'Mic blocked – check site settings.');
-        stopInterviewer();
-      } else if (e.error !== 'no-speech') {
-        document.getElementById('tabStatus').textContent = 'SR error: ' + e.error;
-      }
+      if (e.error === 'not-allowed') { setCardError('tab', 'Mic blocked – check site settings.'); stopInterviewer(); }
+      else if (e.error !== 'no-speech') document.getElementById('tabStatus').textContent = 'SR error: ' + e.error;
     };
 
     interviewerRecognition.onend = () => {
-      if (interviewerListening) {
-        try { interviewerRecognition.start(); } catch (_) {}
-      } else {
-        resetCard('tab');
-        if (!micListening) document.body.classList.remove('listening');
-      }
+      if (interviewerListening) { try { interviewerRecognition.start(); } catch (_) {} }
+      else { resetCard('tab'); }
     };
 
     try { interviewerRecognition.start(); } catch (_) {}
-  }
-
-  function stopInterviewer() {
-    interviewerListening = false;
-    // Flush any buffered chunks before stopping — don't lose partial sentences
-    ivrFlushImmediate();
-    if (interviewerRecognition) { try { interviewerRecognition.stop(); } catch (_) {} interviewerRecognition = null; }
-    resetCard('tab');
-    if (!micListening) document.body.classList.remove('listening');
   }
 
   // ── UI helpers ────────────────────────────────────────────────────────

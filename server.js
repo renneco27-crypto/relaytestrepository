@@ -18,9 +18,10 @@ function loadEnv() {
 }
 loadEnv();
 
-const PORT      = process.env.PORT         || 8080;
-const SECRET    = process.env.RELAY_SECRET || 'interview-copilot-secret';
-const RELAY_URL = process.env.RELAY_URL    || '';
+const PORT        = process.env.PORT         || 8080;
+const SECRET      = process.env.RELAY_SECRET || 'interview-copilot-secret';
+const RELAY_URL   = process.env.RELAY_URL    || '';
+const DEEPGRAM_KEY = process.env.DEEPGRAM_KEY || '';
 
 // ──────────────────────────────────────────────────────────────────────
 // HTTP SERVER — serves phone.html at / and /phone.html
@@ -39,8 +40,9 @@ const httpServer = http.createServer((req, res) => {
       }
       // Inject relay URL and secret so the page can connect without hardcoding.
       const injected = data
-        .replace(/\{\{RELAY_URL\}\}/g,    RELAY_URL)
-        .replace(/\{\{RELAY_SECRET\}\}/g, SECRET);
+        .replace(/\{\{RELAY_URL\}\}/g,     RELAY_URL)
+        .replace(/\{\{RELAY_SECRET\}\}/g,  SECRET)
+        .replace(/\{\{DEEPGRAM_KEY\}\}/g,  DEEPGRAM_KEY);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(injected);
     });
